@@ -13,9 +13,8 @@ export default function ProductsPage({ auth }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({
-    product_id: '',
+    supplier_business_id: '',
     supplier_product_id: '',
-    target_units: '',
     min_businesses_required: '5',
     initial_commitment_units: '',
   });
@@ -28,15 +27,13 @@ export default function ProductsPage({ auth }) {
         setProducts(productsData);
         setSupplierProducts(supplierProductsData);
 
-        if (productsData.length > 0) {
-          setForm((prev) => ({ ...prev, product_id: prev.product_id || productsData[0].id }));
-        }
         if (supplierProductsData.length > 0) {
           const firstSupplierProduct = supplierProductsData[0];
+          const firstSupplierId = firstSupplierProduct.supplier_business_id;
           setForm((prev) => ({
             ...prev,
+            supplier_business_id: prev.supplier_business_id || firstSupplierId,
             supplier_product_id: prev.supplier_product_id || firstSupplierProduct.id,
-            target_units: prev.target_units || String(firstSupplierProduct.available_units),
             initial_commitment_units: prev.initial_commitment_units || String(firstSupplierProduct.min_order_units || 1),
           }));
         }
@@ -53,11 +50,56 @@ export default function ProductsPage({ auth }) {
     [supplierProducts, form.supplier_product_id]
   );
 
+  const supplierOptions = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+    for (const item of supplierProducts) {
+      if (!seen.has(item.supplier_business_id)) {
+        seen.add(item.supplier_business_id);
+        options.push(item.supplier_business_id);
+      }
+    }
+    return options;
+  }, [supplierProducts]);
+
+  const supplierProductOptions = useMemo(
+    () => supplierProducts.filter((item) => item.supplier_business_id === form.supplier_business_id),
+    [supplierProducts, form.supplier_business_id]
+  );
+
+  const resolvedCatalogProduct = useMemo(() => {
+    if (!selectedSupplierProduct) return null;
+    const byName = products.find((item) => item.name === selectedSupplierProduct.name);
+    if (byName) return byName;
+
+    return (
+      products.find(
+        (item) =>
+          item.category?.toLowerCase() === selectedSupplierProduct.category?.toLowerCase() &&
+          item.material?.toLowerCase() === selectedSupplierProduct.material?.toLowerCase()
+      ) || null
+    );
+  }, [products, selectedSupplierProduct]);
+
   const onChange = (key) => (event) => {
     const value = event.target.value;
     setError('');
     setMessage('');
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const onSupplierChange = (event) => {
+    const supplierBusinessId = event.target.value;
+    const options = supplierProducts.filter((item) => item.supplier_business_id === supplierBusinessId);
+    const first = options[0] || null;
+    setError('');
+    setMessage('');
+    setForm((prev) => ({
+      ...prev,
+      supplier_business_id: supplierBusinessId,
+      supplier_product_id: first ? first.id : '',
+      initial_commitment_units: first ? String(first.min_order_units || 1) : prev.initial_commitment_units,
+    }));
   };
 
   const onSupplierProductChange = (event) => {
@@ -68,7 +110,6 @@ export default function ProductsPage({ auth }) {
     setForm((prev) => ({
       ...prev,
       supplier_product_id: supplierProductId,
-      target_units: chosen ? String(chosen.available_units) : prev.target_units,
       initial_commitment_units: chosen ? String(chosen.min_order_units || 1) : prev.initial_commitment_units,
     }));
   };
@@ -81,19 +122,14 @@ export default function ProductsPage({ auth }) {
       return;
     }
 
-    if (!form.product_id || !form.supplier_product_id) {
-      setError('Choose both a catalog product and a supplier listing.');
+    if (!form.supplier_business_id || !form.supplier_product_id) {
+      setError('Choose both a supplier and a product.');
       return;
     }
 
-    const targetUnits = Number(form.target_units);
     const minBusinessesRequired = Number(form.min_businesses_required);
     const initialCommitmentUnits = Number(form.initial_commitment_units);
 
-    if (!Number.isFinite(targetUnits) || targetUnits <= 0) {
-      setError('Target units must be greater than 0.');
-      return;
-    }
     if (!Number.isFinite(minBusinessesRequired) || minBusinessesRequired <= 0) {
       setError('Minimum businesses must be greater than 0.');
       return;
@@ -103,12 +139,16 @@ export default function ProductsPage({ auth }) {
       return;
     }
 
-    if (selectedSupplierProduct && targetUnits > Number(selectedSupplierProduct.available_units)) {
-      setError(`Target units cannot exceed supplier inventory (${selectedSupplierProduct.available_units}).`);
+    if (!selectedSupplierProduct) {
+      setError('Selected supplier product not found.');
       return;
     }
-    if (initialCommitmentUnits > targetUnits) {
-      setError('Your initial commitment cannot exceed target units.');
+    if (!resolvedCatalogProduct) {
+      setError('No matching catalog product found for this supplier listing.');
+      return;
+    }
+    if (initialCommitmentUnits > Number(selectedSupplierProduct.available_units)) {
+      setError(`Your requested units cannot exceed supplier inventory (${selectedSupplierProduct.available_units}).`);
       return;
     }
 
@@ -116,11 +156,11 @@ export default function ProductsPage({ auth }) {
     setError('');
     try {
       const group = await createGroup({
-        product_id: form.product_id,
+        product_id: resolvedCatalogProduct.id,
         created_by_business_id: businessId,
-        supplier_business_id: selectedSupplierProduct?.supplier_business_id || null,
+        supplier_business_id: form.supplier_business_id,
         supplier_product_id: form.supplier_product_id,
-        target_units: targetUnits,
+        target_units: Number(selectedSupplierProduct.available_units),
         min_businesses_required: minBusinessesRequired,
       });
 
@@ -146,7 +186,7 @@ export default function ProductsPage({ auth }) {
       <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
         <h1 className="text-3xl font-semibold">Propose Group Order</h1>
         <p className="mt-2 text-sm text-ink/65">
-          Choose a supplier listing, set your group target, and auto-join as the first business.
+          Choose a supplier and product. Group capacity is set to the supplier's full available inventory.
         </p>
 
         {loading ? (
@@ -161,44 +201,33 @@ export default function ProductsPage({ auth }) {
           <section className="mt-8 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
             <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
               <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Catalog Product</span>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Supplier</span>
                 <select
-                  value={form.product_id}
-                  onChange={onChange('product_id')}
+                  value={form.supplier_business_id}
+                  onChange={onSupplierChange}
                   className="w-full rounded border border-black/15 px-3 py-2"
                 >
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.category})
+                  {supplierOptions.map((supplierId) => (
+                    <option key={supplierId} value={supplierId}>
+                      Supplier {supplierId.slice(0, 8)}
                     </option>
                   ))}
                 </select>
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Supplier Listing</span>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Product</span>
                 <select
                   value={form.supplier_product_id}
                   onChange={onSupplierProductChange}
                   className="w-full rounded border border-black/15 px-3 py-2"
                 >
-                  {supplierProducts.map((sp) => (
+                  {supplierProductOptions.map((sp) => (
                     <option key={sp.id} value={sp.id}>
-                      {sp.name} - {sp.available_units} units available
+                      {sp.name} ({sp.available_units} available)
                     </option>
                   ))}
                 </select>
-              </label>
-
-              <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Group Target Units</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={form.target_units}
-                  onChange={onChange('target_units')}
-                  className="w-full rounded border border-black/15 px-3 py-2"
-                />
               </label>
 
               <label className="text-sm">
@@ -225,7 +254,7 @@ export default function ProductsPage({ auth }) {
 
               {selectedSupplierProduct ? (
                 <div className="rounded bg-emerald-50 p-3 text-sm text-ink/80 md:col-span-2">
-                  Supplier inventory cap: <strong>{selectedSupplierProduct.available_units}</strong> units.
+                  Group capacity (auto): <strong>{selectedSupplierProduct.available_units}</strong> units.
                   Unit price: <strong>${Number(selectedSupplierProduct.unit_price).toFixed(2)}</strong>.
                 </div>
               ) : null}
