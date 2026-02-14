@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 
-import { fetchGroups, joinGroup } from '../api';
+import { fetchGroups, fetchRegions, joinGroup } from '../api';
 import GroupCard from '../components/GroupCard';
 import JoinModal from '../components/JoinModal';
 import Navbar from '../components/Navbar';
@@ -9,29 +9,86 @@ import Toast from '../components/Toast';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
-const HUB = { lng: -122.4013, lat: 37.7751 };
+const DEFAULT_CENTER = { lng: -122.4013, lat: 37.7751 };
+const HALF_SIDE_MILES = 1;
+const MILES_PER_LAT_DEGREE = 69;
+
+function twoMileBounds(centerLng, centerLat) {
+  const latDelta = HALF_SIDE_MILES / MILES_PER_LAT_DEGREE;
+  const lngDelta = HALF_SIDE_MILES / (MILES_PER_LAT_DEGREE * Math.cos((centerLat * Math.PI) / 180));
+  return [
+    [centerLng - lngDelta, centerLat - latDelta],
+    [centerLng + lngDelta, centerLat + latDelta]
+  ];
+}
 
 export default function GroupsPage({ auth }) {
   const [groups, setGroups] = useState([]);
+  const [regionsById, setRegionsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
   const [filter, setFilter] = useState('all');
   const [modalGroup, setModalGroup] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '' });
+  const [mapReady, setMapReady] = useState(false);
 
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
+  const markerRef = useRef(null);
   const cardRefs = useRef({});
 
   useEffect(() => {
-    fetchGroups()
-      .then((data) => {
-        setGroups(data);
-        if (data.length > 0) setActiveId(data[0].id);
+    let cancelled = false;
+
+    Promise.allSettled([fetchGroups(), fetchRegions()])
+      .then(([groupResult, regionResult]) => {
+        if (cancelled) return;
+
+        const groupData = groupResult.status === 'fulfilled' ? groupResult.value : [];
+        const regionData = regionResult.status === 'fulfilled' ? regionResult.value : [];
+
+        setGroups(groupData);
+        setRegionsById(Object.fromEntries(regionData.map((region) => [region.id, region])));
+        if (groupData.length > 0) {
+          setActiveId((currentActiveId) =>
+            currentActiveId && groupData.some((group) => group.id === currentActiveId) ? currentActiveId : groupData[0].id
+          );
+        }
       })
-      .catch(() => setGroups([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const activeGroup = groups.find((group) => group.id === activeId) || null;
+
+  const applyBoundsForGroup = useCallback(
+    (group) => {
+      const map = mapRef.current;
+      if (!map || !map.isStyleLoaded()) return;
+
+      const region = group?.region_id ? regionsById[group.region_id] : null;
+      const centerLat = region?.bounds
+        ? (region.bounds.min_lat + region.bounds.max_lat) / 2
+        : DEFAULT_CENTER.lat;
+      const centerLng = region?.bounds
+        ? (region.bounds.min_lng + region.bounds.max_lng) / 2
+        : DEFAULT_CENTER.lng;
+      const bounds = twoMileBounds(centerLng, centerLat);
+
+      map.setMaxBounds(bounds);
+      map.fitBounds(bounds, { padding: 0, duration: 0 });
+      map.setMinZoom(map.getZoom());
+      if (markerRef.current) {
+        markerRef.current.setLngLat([centerLng, centerLat]);
+      }
+    },
+    [regionsById]
+  );
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -40,43 +97,53 @@ export default function GroupsPage({ auth }) {
       mapRef.current = null;
     }
 
+    const defaultBounds = twoMileBounds(DEFAULT_CENTER.lng, DEFAULT_CENTER.lat);
     const map = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/dark-v11',
-      center: [HUB.lng, HUB.lat],
+      center: [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat],
       zoom: 13,
       pitch: 42,
       bearing: -8,
-      antialias: true
+      antialias: true,
+      maxBounds: defaultBounds,
+      maxZoom: 18,
+      renderWorldCopies: false
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-left');
 
     map.on('load', () => {
+      map.fitBounds(defaultBounds, { padding: 0, duration: 0 });
+      map.setMinZoom(map.getZoom());
+
       const hubEl = document.createElement('div');
       hubEl.className = 'hub-label';
-      hubEl.textContent = 'Delivery Hub';
-      new mapboxgl.Marker({ element: hubEl, anchor: 'bottom' }).setLngLat([HUB.lng, HUB.lat]).addTo(map);
+      hubEl.textContent = 'Group Area';
+      markerRef.current = new mapboxgl.Marker({ element: hubEl, anchor: 'bottom' })
+        .setLngLat([DEFAULT_CENTER.lng, DEFAULT_CENTER.lat])
+        .addTo(map);
+      setMapReady(true);
     });
 
     mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
+      markerRef.current = null;
+      setMapReady(false);
     };
   }, []);
 
-  const highlightGroup = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    map.flyTo({ center: [HUB.lng, HUB.lat], zoom: 13, duration: 600 });
-  }, []);
+  useEffect(() => {
+    if (!mapReady) return;
+    applyBoundsForGroup(activeGroup);
+  }, [mapReady, activeGroup, applyBoundsForGroup]);
 
   useEffect(() => {
     if (!activeId) return;
-    highlightGroup(activeId);
     const cardEl = cardRefs.current[activeId];
     if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [activeId, highlightGroup]);
+  }, [activeId]);
 
   const handleJoin = async (groupId, units) => {
     try {
@@ -106,7 +173,7 @@ export default function GroupsPage({ auth }) {
 
       <aside className="relative z-30 ml-auto flex h-screen w-full max-w-xl flex-col bg-cream shadow-2xl">
         <div className="border-b border-black/10 px-5 pb-5 pt-20 sm:px-7">
-          <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco · {groups.length} active groups</p>
+          <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco - {groups.length} active groups</p>
           <h1 className="mt-2 text-3xl font-semibold text-ink">Buying Groups</h1>
           <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink/70">
             <span>
