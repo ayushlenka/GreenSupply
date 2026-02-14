@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
-import { fetchProducts } from '../api';
+import { useEffect, useState } from 'react';
 
-export default function ProductsPage() {
+import { fetchProducts } from '../api';
+import Navbar from '../components/Navbar';
+
+export default function ProductsPage({ auth }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -14,45 +15,55 @@ export default function ProductsPage() {
   }, []);
 
   return (
-    <>
-      <Navbar solid />
-      <div className="products-page">
-        <h1>Products</h1>
-        <p className="subtitle">Sustainable packaging available for bulk ordering</p>
+    <div className="min-h-screen bg-cream text-ink">
+      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} />
+
+      <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
+        <h1 className="text-3xl font-semibold">Products</h1>
+        <p className="mt-2 text-sm text-ink/65">Sustainable packaging available for bulk ordering</p>
 
         {loading ? (
-          <div className="loading-container" style={{ height: 200 }}>
-            <div className="loading-spinner" />
-            Loading products...
-          </div>
+          <div className="mt-12 text-sm text-ink/60">Loading products...</div>
         ) : products.length === 0 ? (
-          <div className="empty-state">No products found. Make sure the backend is running.</div>
+          <div className="mt-12 text-sm text-ink/60">No products found. Make sure backend is running.</div>
         ) : (
-          <div className="products-grid">
+          <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {products.map((p) => (
-              <div key={p.id} className="product-card">
-                <div className="card-top">
-                  <div className="product-name">{p.name}</div>
-                  <span className={`badge badge-${p.category.toLowerCase()}`}>{p.category}</span>
+              <article key={p.id} className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="text-lg font-semibold">{p.name}</h2>
+                  <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-700">
+                    {p.category}
+                  </span>
                 </div>
-                <div className="product-material">{p.material}</div>
-                {p.certifications?.length > 0 && (
-                  <div className="product-certs">
+                <p className="mt-2 text-sm text-ink/65">{p.material}</p>
+
+                {p.certifications?.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {p.certifications.map((c) => (
-                      <span key={c} className="cert-tag">{c}</span>
+                      <span key={c} className="rounded bg-emerald-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-moss">
+                        {c}
+                      </span>
                     ))}
                   </div>
-                )}
-                <div className="product-pricing">
-                  <span className="price-item">Retail: <strong>${p.retail_unit_price.toFixed(2)}</strong>/unit</span>
-                  <span className="price-item">Bulk: <strong>${p.bulk_unit_price.toFixed(2)}</strong>/unit</span>
-                  <span className="price-item">Min: <strong>{p.min_bulk_units}</strong> units</span>
+                ) : null}
+
+                <div className="mt-4 grid grid-cols-1 gap-1 text-sm text-ink/75">
+                  <p>
+                    Retail: <strong className="text-moss">${p.retail_unit_price.toFixed(2)}</strong>/unit
+                  </p>
+                  <p>
+                    Bulk: <strong className="text-moss">${p.bulk_unit_price.toFixed(2)}</strong>/unit
+                  </p>
+                  <p>
+                    Min: <strong className="text-moss">{p.min_bulk_units}</strong> units
+                  </p>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
-      </div>
-    </>
+      </main>
+    </div>
   );
 }

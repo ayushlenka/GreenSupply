@@ -1,25 +1,27 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --ink:       #1a1a18;
-  --parchment: #f5f0e8;
-  --cream:     #faf7f2;
-  --moss:      #3a6b4a;
-  --sage:      #6b9e7a;
-  --fern:      #9dc4a0;
-  --bark:      #8b6f47;
-  --mist:      #d4e8d8;
-  --red:       #c0392b;
-  --amber:     #e67e22;
-  --sidebar-w: 420px;
+html,
+body,
+#root {
+  height: 100%;
 }
 
-html, body, #root {
-  height: 100%;
+body {
   margin: 0;
-  padding: 0;
-  font-family: 'DM Sans', sans-serif;
-  background: var(--ink);
-  color: var(--ink);
-  overflow: hidden;
+  font-family: 'DM Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+.hub-label {
+  background: #3a6b4a;
+  color: #f5f0e8;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }

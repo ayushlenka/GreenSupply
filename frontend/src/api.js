@@ -1,8 +1,14 @@
 const API_BASE = process.env.REACT_APP_API_BASE || '/api/v1';
+const TOKEN_KEY = 'greensupply_access_token';
 
 async function request(path, options = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers
+    },
     ...options,
   });
   if (!res.ok) {
@@ -10,6 +16,10 @@ async function request(path, options = {}) {
     throw new Error(body.detail || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+export function fetchMe() {
+  return request('/auth/me');
 }
 
 export function fetchGroups() {

@@ -1,8 +1,46 @@
 from decimal import Decimal
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 
-from app.service.group_service import _build_group_metrics, join_group
+from app.service.group_service import _build_group_metrics, _maybe_confirm_group, create_group, join_group
+
+
+class _ExecResult:
+    def __init__(self, *, one=None, rows=None):
+        self._one = one
+        self._rows = rows or []
+
+    def scalar_one_or_none(self):
+        return self._one
+
+    def all(self):
+        return self._rows
+
+
+class _Session:
+    def __init__(self, gets=None, executes=None):
+        self._gets = gets or {}
+        self._executes = executes or []
+        self.added = []
+        self.commit_count = 0
+
+    async def get(self, model, key):
+        return self._gets.get((model.__name__, key))
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        self.commit_count += 1
+
+    async def refresh(self, _obj):
+        return None
+
+    async def execute(self, _stmt):
+        if self._executes:
+            return self._executes.pop(0)
+        return _ExecResult()
 
 
 class TestGroupService(unittest.IsolatedAsyncioTestCase):
@@ -32,3 +70,93 @@ class TestGroupService(unittest.IsolatedAsyncioTestCase):
             await join_group(session=None, group_id="g1", business_id="b1", units=0)
 
         self.assertEqual(str(ctx.exception), "units must be greater than 0")
+
+    async def test_create_group_rejects_target_above_supplier_inventory(self):
+        product = SimpleNamespace(id="p1", min_bulk_units=100)
+        business = SimpleNamespace(id="b1", account_type="business", region_id=2)
+        supplier = SimpleNamespace(id="s1", account_type="supplier", region_id=2)
+        supplier_product = SimpleNamespace(
+            id="sp1",
+            supplier_business_id="s1",
+            status="active",
+            available_units=50,
+        )
+        session = _Session(
+            gets={
+                ("Product", "p1"): product,
+                ("Business", "b1"): business,
+                ("Business", "s1"): supplier,
+                ("SupplierProduct", "sp1"): supplier_product,
+            }
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            await create_group(
+                session,
+                product_id="p1",
+                created_by_business_id="b1",
+                supplier_business_id="s1",
+                supplier_product_id="sp1",
+                target_units=60,
+                min_businesses_required=5,
+                deadline=None,
+            )
+
+        self.assertIn("exceeds supplier available units", str(ctx.exception))
+
+    async def test_auto_confirm_decrements_supplier_inventory(self):
+        group = SimpleNamespace(
+            id="g1",
+            status="active",
+            min_businesses_required=2,
+            supplier_business_id="s1",
+            supplier_product_id="sp1",
+            confirmed_at=None,
+        )
+        supplier_product = SimpleNamespace(id="sp1", available_units=150, status="active")
+
+        session = _Session(
+            gets={
+                ("BuyingGroup", "g1"): group,
+                ("SupplierProduct", "sp1"): supplier_product,
+            },
+            executes=[
+                _ExecResult(one=None),
+                _ExecResult(rows=[("a@x.com",), ("b@x.com",)]),
+            ],
+        )
+
+        with patch("app.service.group_service._fetch_group_rollups", new=AsyncMock(return_value={"g1": {"current_units": 120, "business_count": 2}})), \
+             patch("app.service.group_service.send_group_confirmed_email", new=AsyncMock(return_value=True)):
+            await _maybe_confirm_group(session, "g1")
+
+        self.assertEqual(group.status, "confirmed")
+        self.assertEqual(supplier_product.available_units, 30)
+        self.assertEqual(supplier_product.status, "active")
+        self.assertEqual(len(session.added), 1)
+
+    async def test_auto_confirm_fails_when_inventory_insufficient(self):
+        group = SimpleNamespace(
+            id="g2",
+            status="active",
+            min_businesses_required=2,
+            supplier_business_id="s1",
+            supplier_product_id="sp2",
+            confirmed_at=None,
+        )
+        supplier_product = SimpleNamespace(id="sp2", available_units=40, status="active")
+        session = _Session(
+            gets={
+                ("BuyingGroup", "g2"): group,
+                ("SupplierProduct", "sp2"): supplier_product,
+            },
+            executes=[],
+        )
+
+        with patch("app.service.group_service._fetch_group_rollups", new=AsyncMock(return_value={"g2": {"current_units": 80, "business_count": 2}})):
+            with self.assertRaises(ValueError) as ctx:
+                await _maybe_confirm_group(session, "g2")
+
+        self.assertIn("insufficient", str(ctx.exception))
+        self.assertEqual(group.status, "active")
+        self.assertEqual(supplier_product.available_units, 40)

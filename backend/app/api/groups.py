@@ -21,7 +21,10 @@ async def create_group_endpoint(payload: GroupCreate, db: AsyncSession = Depends
             db,
             product_id=payload.product_id,
             created_by_business_id=payload.created_by_business_id,
+            supplier_business_id=payload.supplier_business_id,
+            supplier_product_id=payload.supplier_product_id,
             target_units=payload.target_units,
+            min_businesses_required=payload.min_businesses_required,
             deadline=payload.deadline,
         )
     except ValueError as exc:

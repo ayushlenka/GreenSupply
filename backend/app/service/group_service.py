@@ -12,6 +12,9 @@ from app.db.models.business import Business
 from app.db.models.buying_group import BuyingGroup
 from app.db.models.group_commitment import GroupCommitment
 from app.db.models.product import Product
+from app.db.models.supplier_confirmed_order import SupplierConfirmedOrder
+from app.db.models.supplier_product import SupplierProduct
+from app.service.email_service import send_group_confirmed_email
 from app.service.utils import safe_divide, to_float
 
 settings = get_settings()
@@ -53,7 +56,10 @@ async def create_group(
     *,
     product_id: str,
     created_by_business_id: str,
+    supplier_business_id: str | None,
+    supplier_product_id: str | None,
     target_units: int | None,
+    min_businesses_required: int | None,
     deadline: datetime | None,
 ) -> BuyingGroup:
     product = await session.get(Product, product_id)
@@ -63,14 +69,48 @@ async def create_group(
     business = await session.get(Business, created_by_business_id)
     if not business:
         raise ValueError("Business not found")
+    if business.account_type != "business":
+        raise ValueError("Only business accounts can create buying groups")
+    if business.region_id is None:
+        raise ValueError("Business must be assigned to a region before creating a group")
+
+    supplier = None
+    supplier_product = None
+    if supplier_business_id:
+        supplier = await session.get(Business, supplier_business_id)
+        if not supplier:
+            raise ValueError("Supplier business not found")
+        if supplier.account_type != "supplier":
+            raise ValueError("supplier_business_id must reference a supplier account")
+        if supplier.region_id is not None and supplier.region_id != business.region_id:
+            raise ValueError("Supplier must be in the same region as the buying group")
+    if supplier_product_id:
+        supplier_product = await session.get(SupplierProduct, supplier_product_id)
+        if not supplier_product:
+            raise ValueError("Supplier product not found")
+        if supplier and supplier_product.supplier_business_id != supplier.id:
+            raise ValueError("Supplier product does not belong to supplier_business_id")
+        if supplier_product.status != "active":
+            raise ValueError("Supplier product is not active")
+        if supplier_product.available_units <= 0:
+            raise ValueError("Supplier product is out of stock")
+        if target_units and target_units > supplier_product.available_units:
+            raise ValueError("target_units exceeds supplier available units")
+        if not supplier:
+            supplier = await session.get(Business, supplier_product.supplier_business_id)
 
     group = BuyingGroup(
         id=str(uuid4()),
         product_id=product_id,
         created_by_business_id=created_by_business_id,
+        supplier_business_id=supplier.id if supplier else None,
+        supplier_product_id=supplier_product.id if supplier_product else None,
+        region_id=business.region_id,
         target_units=target_units or product.min_bulk_units,
+        min_businesses_required=max(1, min_businesses_required or settings.group_default_min_businesses_required),
         deadline=deadline or (datetime.utcnow() + timedelta(hours=72)),
         status="active",
+        confirmed_at=None,
         created_at=datetime.utcnow(),
     )
     session.add(group)
@@ -90,6 +130,14 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
     business = await session.get(Business, business_id)
     if not business:
         raise ValueError("Business not found")
+    if business.account_type != "business":
+        raise ValueError("Only business accounts can join groups")
+    if business.region_id is None:
+        raise ValueError("Business must be assigned to a region before joining groups")
+    if group.region_id != business.region_id:
+        raise ValueError("Businesses can only join groups in the same region")
+    if group.status == "confirmed":
+        raise ValueError("Group is already confirmed")
 
     commitment = GroupCommitment(
         id=str(uuid4()),
@@ -101,7 +149,62 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
     session.add(commitment)
     await session.commit()
     await session.refresh(commitment)
+    await _maybe_confirm_group(session, group.id)
     return commitment
+
+
+async def _maybe_confirm_group(session: AsyncSession, group_id: str) -> None:
+    group = await session.get(BuyingGroup, group_id)
+    if not group or group.status == "confirmed":
+        return
+
+    rollups = await _fetch_group_rollups(session, [group_id])
+    stats = rollups.get(group_id, {"current_units": 0, "business_count": 0})
+    current_units = int(stats["current_units"])
+    business_count = int(stats["business_count"])
+
+    if business_count < int(group.min_businesses_required):
+        return
+
+    supplier_product = None
+    if group.supplier_product_id:
+        supplier_product = await session.get(SupplierProduct, group.supplier_product_id)
+        if supplier_product and supplier_product.available_units < current_units:
+            raise ValueError("Supplier inventory is insufficient for confirmation")
+
+    group.status = "confirmed"
+    group.confirmed_at = datetime.utcnow()
+
+    if group.supplier_business_id:
+        existing = await session.execute(select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id == group.id))
+        if existing.scalar_one_or_none() is None:
+            if supplier_product:
+                supplier_product.available_units = int(supplier_product.available_units) - current_units
+                if supplier_product.available_units <= 0:
+                    supplier_product.available_units = 0
+                    supplier_product.status = "sold_out"
+            session.add(
+                SupplierConfirmedOrder(
+                    id=str(uuid4()),
+                    supplier_business_id=group.supplier_business_id,
+                    supplier_product_id=group.supplier_product_id,
+                    group_id=group.id,
+                    total_units=current_units,
+                    business_count=business_count,
+                    status="confirmed",
+                    created_at=datetime.utcnow(),
+                )
+            )
+
+    await session.commit()
+
+    participant_result = await session.execute(
+        select(Business.email)
+        .join(GroupCommitment, GroupCommitment.business_id == Business.id)
+        .where(GroupCommitment.group_id == group.id, Business.email.is_not(None))
+    )
+    recipients = sorted({str(email).strip() for (email,) in participant_result.all() if email})
+    await send_group_confirmed_email(recipients, group.id)
 
 
 async def _fetch_group_rollups(session: AsyncSession, group_ids: list[str]) -> dict[str, dict[str, int]]:
@@ -137,7 +240,7 @@ def _group_base_query() -> Select[tuple[BuyingGroup, Product]]:
 
 
 async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
-    result = await session.execute(_group_base_query().where(BuyingGroup.status == "active"))
+    result = await session.execute(_group_base_query().where(BuyingGroup.status.in_(["active", "confirmed"])))
     rows = result.all()
 
     groups = [row[0] for row in rows]
@@ -154,6 +257,16 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
             {
                 "id": group.id,
                 "status": group.status,
+                "region_id": group.region_id,
+                "supplier_business_id": group.supplier_business_id,
+                "supplier_product_id": group.supplier_product_id,
+                "supplier_available_units": (
+                    int(sp.available_units)
+                    if (sp := await session.get(SupplierProduct, group.supplier_product_id)) is not None
+                    else None
+                ),
+                "min_businesses_required": group.min_businesses_required,
+                "confirmed_at": group.confirmed_at,
                 "deadline": group.deadline,
                 "target_units": group.target_units,
                 "product": {
@@ -194,6 +307,14 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
     return {
         "id": group.id,
         "status": group.status,
+        "region_id": group.region_id,
+        "supplier_business_id": group.supplier_business_id,
+        "supplier_product_id": group.supplier_product_id,
+        "supplier_available_units": (
+            int(sp.available_units) if (sp := await session.get(SupplierProduct, group.supplier_product_id)) is not None else None
+        ),
+        "min_businesses_required": group.min_businesses_required,
+        "confirmed_at": group.confirmed_at,
         "deadline": group.deadline,
         "target_units": group.target_units,
         "created_by_business_id": group.created_by_business_id,

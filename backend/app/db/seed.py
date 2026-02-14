@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.product import Product
+from app.db.models.region import Region
 
 SEED_PRODUCTS = [
     {
@@ -152,5 +153,60 @@ async def seed_products(session: AsyncSession) -> None:
                 created_at=datetime.utcnow(),
             )
         )
+
+    await session.commit()
+
+
+SF_CENTER_LAT = 37.7749
+SF_CENTER_LNG = -122.4194
+HALF_SPAN_MILES = 3.5
+BLOCK_MILES = 2.0
+
+
+def _miles_to_lat(miles: float) -> float:
+    return miles / 69.0
+
+
+def _miles_to_lng(miles: float, lat: float) -> float:
+    from math import cos, radians
+
+    return miles / (69.172 * max(cos(radians(lat)), 0.2))
+
+
+async def seed_regions(session: AsyncSession) -> None:
+    existing_sf = await session.execute(select(Region.id).where(Region.code.like("SF-%")).limit(1))
+    if existing_sf.first() is not None:
+        return
+
+    total_span = HALF_SPAN_MILES * 2
+    cells = int((total_span + BLOCK_MILES - 0.0001) // BLOCK_MILES)  # 4 cells for 7x7 with 2-mile blocks
+
+    min_lat = SF_CENTER_LAT - _miles_to_lat(HALF_SPAN_MILES)
+    max_lat = SF_CENTER_LAT + _miles_to_lat(HALF_SPAN_MILES)
+    min_lng = SF_CENTER_LNG - _miles_to_lng(HALF_SPAN_MILES, SF_CENTER_LAT)
+    max_lng = SF_CENTER_LNG + _miles_to_lng(HALF_SPAN_MILES, SF_CENTER_LAT)
+
+    lat_step = (max_lat - min_lat) / cells
+    lng_step = (max_lng - min_lng) / cells
+
+    for row in range(cells):
+        for col in range(cells):
+            r_min_lat = min_lat + (row * lat_step)
+            r_max_lat = min_lat + ((row + 1) * lat_step)
+            r_min_lng = min_lng + (col * lng_step)
+            r_max_lng = min_lng + ((col + 1) * lng_step)
+
+            session.add(
+                Region(
+                    code=f"SF-{row + 1}-{col + 1}",
+                    name=f"SF Block {row + 1}-{col + 1}",
+                    row_index=row + 1,
+                    col_index=col + 1,
+                    min_lat=r_min_lat,
+                    max_lat=r_max_lat,
+                    min_lng=r_min_lng,
+                    max_lng=r_max_lng,
+                )
+            )
 
     await session.commit()

@@ -1,16 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import Navbar from '../components/Navbar';
+
+import { fetchGroups, joinGroup } from '../api';
 import GroupCard from '../components/GroupCard';
 import JoinModal from '../components/JoinModal';
+import Navbar from '../components/Navbar';
 import Toast from '../components/Toast';
-import { fetchGroups, joinGroup } from '../api';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 
 const HUB = { lng: -122.4013, lat: 37.7751 };
 
-export default function GroupsPage() {
+export default function GroupsPage({ auth }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
@@ -20,11 +21,8 @@ export default function GroupsPage() {
 
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
-  const markersRef = useRef([]);
-  const activeLayersRef = useRef([]);
   const cardRefs = useRef({});
 
-  // Load groups from API
   useEffect(() => {
     fetchGroups()
       .then((data) => {
@@ -35,12 +33,13 @@ export default function GroupsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Initialize map
   useEffect(() => {
+    if (!mapContainer.current) return;
     if (mapRef.current) {
       mapRef.current.remove();
       mapRef.current = null;
     }
+
     const map = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/dark-v11',
@@ -48,17 +47,15 @@ export default function GroupsPage() {
       zoom: 13,
       pitch: 42,
       bearing: -8,
-      antialias: true,
+      antialias: true
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-left');
 
     map.on('load', () => {
       const hubEl = document.createElement('div');
       hubEl.className = 'hub-label';
-      hubEl.textContent = '📦 Delivery Hub';
-      new mapboxgl.Marker({ element: hubEl, anchor: 'bottom' })
-        .setLngLat([HUB.lng, HUB.lat])
-        .addTo(map);
+      hubEl.textContent = 'Delivery Hub';
+      new mapboxgl.Marker({ element: hubEl, anchor: 'bottom' }).setLngLat([HUB.lng, HUB.lat]).addTo(map);
     });
 
     mapRef.current = map;
@@ -68,146 +65,111 @@ export default function GroupsPage() {
     };
   }, []);
 
-  // Highlight active group on map
-  const highlightGroup = useCallback((id) => {
+  const highlightGroup = useCallback(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-
-    // Dim all markers
-    markersRef.current.forEach(({ el }) => {
-      el.style.opacity = '0.2';
-      el.classList.remove('active-marker');
-    });
-
-    // Highlight active
-    markersRef.current
-      .filter((m) => m.groupId === id)
-      .forEach(({ el }) => {
-        el.style.opacity = '1';
-        el.classList.add('active-marker');
-      });
-
-    // Clear old route lines
-    activeLayersRef.current.forEach((lid) => {
-      if (map.getLayer(lid)) map.removeLayer(lid);
-      if (map.getSource(lid)) map.removeSource(lid);
-    });
-    activeLayersRef.current = [];
-
-    // For now, just fly to hub since the API doesn't return coordinates
-    // When backend adds coordinates, draw routes like groups.html
-    map.flyTo({ center: [HUB.lng, HUB.lat], zoom: 13, duration: 800 });
+    map.flyTo({ center: [HUB.lng, HUB.lat], zoom: 13, duration: 600 });
   }, []);
 
-  // When activeId changes, highlight on map and scroll card into view
   useEffect(() => {
-    if (activeId) {
-      highlightGroup(activeId);
-      const cardEl = cardRefs.current[activeId];
-      if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    if (!activeId) return;
+    highlightGroup(activeId);
+    const cardEl = cardRefs.current[activeId];
+    if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [activeId, highlightGroup]);
 
   const handleJoin = async (groupId, units) => {
     try {
-      // For demo, use a placeholder business_id
       await joinGroup(groupId, 'demo-business', units);
       setToast({ visible: true, message: `Joined! ${units.toLocaleString()} units committed.` });
       setModalGroup(null);
-      // Refresh groups
       const updated = await fetchGroups();
       setGroups(updated);
-    } catch (err) {
-      setToast({ visible: true, message: `Joined! ${units.toLocaleString()} units committed.` });
+    } catch {
+      setToast({ visible: true, message: 'Unable to join right now. Try again.' });
       setModalGroup(null);
     }
   };
 
-  // Get unique categories for filters
   const categories = [...new Set(groups.map((g) => (g.product?.category || '').toLowerCase()))].filter(Boolean);
-  const filteredGroups = filter === 'all'
-    ? groups
-    : groups.filter((g) => (g.product?.category || '').toLowerCase() === filter);
+  const filteredGroups =
+    filter === 'all' ? groups : groups.filter((g) => (g.product?.category || '').toLowerCase() === filter);
 
-  // Compute summary stats
   const totalBusinesses = groups.reduce((s, g) => s + (g.business_count || 0), 0);
   const totalSavings = groups.reduce((s, g) => s + (g.estimated_savings_usd || 0), 0);
   const totalTrips = groups.reduce((s, g) => s + (g.delivery_trips_reduced || 0), 0);
 
   return (
-    <div className="app-layout">
-      <div ref={mapContainer} className="map-container" />
-      <Navbar />
+    <div className="relative min-h-screen overflow-hidden bg-ink">
+      <div ref={mapContainer} className="absolute inset-0" />
+      <Navbar solid={false} isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} />
 
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="eyebrow">San Francisco · {groups.length} active groups</div>
-          <h1>Buying Groups</h1>
-          <div className="meta-row">
-            <div className="meta-item"><strong>{totalBusinesses}</strong> businesses joined</div>
-            <div className="meta-item"><strong>${totalSavings.toFixed(0)}</strong> unlocked</div>
-            <div className="meta-item"><strong>{totalTrips}</strong> trips saved</div>
+      <aside className="relative z-30 ml-auto flex h-screen w-full max-w-xl flex-col bg-cream shadow-2xl">
+        <div className="border-b border-black/10 px-5 pb-5 pt-20 sm:px-7">
+          <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco � {groups.length} active groups</p>
+          <h1 className="mt-2 text-3xl font-semibold text-ink">Buying Groups</h1>
+          <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink/70">
+            <span>
+              <strong className="text-moss">{totalBusinesses}</strong> businesses joined
+            </span>
+            <span>
+              <strong className="text-moss">${totalSavings.toFixed(0)}</strong> unlocked
+            </span>
+            <span>
+              <strong className="text-moss">{totalTrips}</strong> trips saved
+            </span>
           </div>
         </div>
 
-        <div className="filter-bar">
-          <button
-            className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-            onClick={() => setFilter('all')}
-          >
-            All
-          </button>
-          {categories.map((cat) => (
+        <div className="border-b border-black/10 px-5 py-3 sm:px-7">
+          <div className="flex flex-wrap gap-2">
             <button
-              key={cat}
-              className={`filter-btn ${filter === cat ? 'active' : ''}`}
-              onClick={() => setFilter(cat)}
+              className={`rounded-full border px-3 py-1 text-xs ${filter === 'all' ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'}`}
+              onClick={() => setFilter('all')}
             >
-              {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              All
             </button>
-          ))}
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                className={`rounded-full border px-3 py-1 text-xs capitalize ${
+                  filter === cat ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'
+                }`}
+                onClick={() => setFilter(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="group-list">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {loading ? (
-            <div className="loading-container">
-              <div className="loading-spinner" />
-              Loading groups...
-            </div>
+            <div className="py-10 text-center text-sm text-ink/60">Loading groups...</div>
           ) : filteredGroups.length === 0 ? (
-            <div className="empty-state">
-              {groups.length === 0
-                ? 'No active groups. Make sure the backend is running.'
-                : 'No groups in this category'}
+            <div className="py-10 text-center text-sm text-ink/60">
+              {groups.length === 0 ? 'No active groups. Make sure backend is running.' : 'No groups in this category.'}
             </div>
           ) : (
-            filteredGroups.map((g, i) => (
-              <div key={g.id} ref={(el) => (cardRefs.current[g.id] = el)}>
-                <GroupCard
-                  group={g}
-                  isActive={g.id === activeId}
-                  onSelect={setActiveId}
-                  onJoin={setModalGroup}
-                  style={{ animationDelay: `${i * 0.05}s` }}
-                />
-              </div>
-            ))
+            <div className="space-y-3">
+              {filteredGroups.map((g, i) => (
+                <div key={g.id} ref={(el) => (cardRefs.current[g.id] = el)}>
+                  <GroupCard
+                    group={g}
+                    isActive={g.id === activeId}
+                    onSelect={setActiveId}
+                    onJoin={setModalGroup}
+                    style={{ animationDelay: `${i * 0.04}s` }}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </aside>
 
-      <JoinModal
-        group={modalGroup}
-        open={!!modalGroup}
-        onClose={() => setModalGroup(null)}
-        onSubmit={handleJoin}
-      />
-
-      <Toast
-        message={toast.message}
-        visible={toast.visible}
-        onHide={() => setToast((t) => ({ ...t, visible: false }))}
-      />
+      <JoinModal group={modalGroup} open={!!modalGroup} onClose={() => setModalGroup(null)} onSubmit={handleJoin} />
+      <Toast message={toast.message} visible={toast.visible} onHide={() => setToast((t) => ({ ...t, visible: false }))} />
     </div>
   );
 }

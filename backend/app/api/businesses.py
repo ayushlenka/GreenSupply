@@ -10,13 +10,21 @@ router = APIRouter(prefix="/businesses")
 
 @router.post("", response_model=BusinessRead, status_code=status.HTTP_201_CREATED)
 async def create_business_endpoint(payload: BusinessCreate, db: AsyncSession = Depends(get_db_session)) -> BusinessRead:
-    business = await create_business(
-        db,
-        name=payload.name,
-        business_type=payload.business_type,
-        neighborhood=payload.neighborhood,
-        zip_code=payload.zip_code,
-    )
+    try:
+        business = await create_business(
+            db,
+            name=payload.name,
+            email=payload.email,
+            business_type=payload.business_type,
+            account_type=payload.account_type,
+            address=payload.address,
+            neighborhood=payload.neighborhood,
+            zip_code=payload.zip_code,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return BusinessRead.model_validate(business)
 
 

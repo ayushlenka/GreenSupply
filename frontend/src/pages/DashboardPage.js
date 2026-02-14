@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
-import { fetchGroups } from '../api';
+import { useEffect, useState } from 'react';
 
-export default function DashboardPage() {
+import { fetchGroups } from '../api';
+import Navbar from '../components/Navbar';
+
+export default function DashboardPage({ auth }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,51 +21,37 @@ export default function DashboardPage() {
   const totalTrips = groups.reduce((s, g) => s + (g.delivery_trips_reduced || 0), 0);
   const totalMiles = groups.reduce((s, g) => s + (g.delivery_miles_saved || 0), 0);
 
+  const cards = [
+    { label: 'Active Groups', value: groups.length, unit: null },
+    { label: 'Businesses Participating', value: totalBusinesses, unit: null },
+    { label: 'Total Savings', value: `$${totalSavings.toFixed(2)}`, unit: 'USD saved through bulk pricing' },
+    { label: 'CO2 Reduced', value: totalCO2.toFixed(2), unit: 'kg of CO2 avoided' },
+    { label: 'Plastic Avoided', value: totalPlastic.toFixed(2), unit: 'kg of plastic avoided' },
+    { label: 'Delivery Trips Saved', value: totalTrips, unit: `${totalMiles.toFixed(1)} miles reduced` }
+  ];
+
   return (
-    <>
-      <Navbar solid />
-      <div className="dashboard-page">
-        <h1>Impact Dashboard</h1>
-        <p className="subtitle">Aggregate environmental and financial impact across all active groups</p>
+    <div className="min-h-screen bg-cream text-ink">
+      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} />
+
+      <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
+        <h1 className="text-3xl font-semibold">Impact Dashboard</h1>
+        <p className="mt-2 text-sm text-ink/65">Aggregate environmental and financial impact across active groups</p>
 
         {loading ? (
-          <div className="loading-container" style={{ height: 200 }}>
-            <div className="loading-spinner" />
-            Loading dashboard...
-          </div>
+          <div className="mt-12 text-sm text-ink/60">Loading dashboard...</div>
         ) : (
-          <div className="dashboard-grid">
-            <div className="dash-card">
-              <div className="dash-label">Active Groups</div>
-              <div className="dash-value">{groups.length}</div>
-            </div>
-            <div className="dash-card">
-              <div className="dash-label">Businesses Participating</div>
-              <div className="dash-value">{totalBusinesses}</div>
-            </div>
-            <div className="dash-card">
-              <div className="dash-label">Total Savings</div>
-              <div className="dash-value">${totalSavings.toFixed(2)}</div>
-              <div className="dash-unit">USD saved through bulk pricing</div>
-            </div>
-            <div className="dash-card">
-              <div className="dash-label">CO₂ Reduced</div>
-              <div className="dash-value">{totalCO2.toFixed(2)}</div>
-              <div className="dash-unit">kg of CO₂ avoided</div>
-            </div>
-            <div className="dash-card">
-              <div className="dash-label">Plastic Avoided</div>
-              <div className="dash-value">{totalPlastic.toFixed(2)}</div>
-              <div className="dash-unit">kg of plastic saved</div>
-            </div>
-            <div className="dash-card">
-              <div className="dash-label">Delivery Trips Saved</div>
-              <div className="dash-value">{totalTrips}</div>
-              <div className="dash-unit">{totalMiles.toFixed(1)} miles reduced</div>
-            </div>
+          <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {cards.map((card) => (
+              <article key={card.label} className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-sage">{card.label}</p>
+                <p className="mt-2 text-3xl font-semibold text-moss">{card.value}</p>
+                {card.unit ? <p className="mt-1 text-xs text-ink/60">{card.unit}</p> : null}
+              </article>
+            ))}
           </div>
         )}
-      </div>
-    </>
+      </main>
+    </div>
   );
 }

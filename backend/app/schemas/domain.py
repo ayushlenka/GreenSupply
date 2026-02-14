@@ -6,9 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class BusinessCreate(BaseModel):
     name: str | None = None
+    email: str | None = None
     business_type: str
+    account_type: str = "business"
+    address: str | None = None
     neighborhood: str
     zip_code: str | None = Field(default=None, alias="zip")
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class BusinessRead(BaseModel):
@@ -16,9 +21,15 @@ class BusinessRead(BaseModel):
 
     id: str
     name: str | None = None
+    email: str | None = None
     business_type: str
+    account_type: str
+    address: str | None = None
     neighborhood: str
     zip: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    region_id: int | None = None
     created_at: datetime
 
 
@@ -40,7 +51,10 @@ class ProductRead(BaseModel):
 class GroupCreate(BaseModel):
     product_id: str
     created_by_business_id: str
+    supplier_business_id: str | None = None
+    supplier_product_id: str | None = None
     target_units: int | None = None
+    min_businesses_required: int | None = None
     deadline: datetime | None = None
 
 
@@ -59,6 +73,12 @@ class GroupCommitmentRead(BaseModel):
 class GroupRead(BaseModel):
     id: str
     status: str
+    region_id: int | None = None
+    supplier_business_id: str | None = None
+    supplier_product_id: str | None = None
+    supplier_available_units: int | None = None
+    min_businesses_required: int | None = None
+    confirmed_at: datetime | None = None
     deadline: datetime | None = None
     target_units: int
     current_units: int
@@ -87,3 +107,38 @@ class ImpactRead(BaseModel):
     delivery_miles_saved: float
     delivery_trips_reduced: int
     city_scale_projection: dict[str, float | int]
+
+
+class SupplierProductCreate(BaseModel):
+    supplier_business_id: str
+    name: str
+    category: str
+    material: str
+    available_units: int
+    unit_price: float
+    min_order_units: int = 1
+
+
+class SupplierProductRead(BaseModel):
+    id: str
+    supplier_business_id: str
+    name: str
+    category: str
+    material: str
+    available_units: int
+    unit_price: float
+    min_order_units: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplierConfirmedOrderRead(BaseModel):
+    id: str
+    supplier_business_id: str
+    supplier_product_id: str | None = None
+    group_id: str
+    total_units: int
+    business_count: int
+    status: str
+    created_at: datetime
