@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -9,6 +10,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.service.group_service import get_group_details, get_group_impact, list_active_groups
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_json_object(text: str) -> dict[str, object] | None:
+    text = text.strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _normalize_output_keys(payload: dict[str, object]) -> dict[str, str]:
+    aliases = {
+        "executiveSummary": "executive_summary",
+        "keyInsight": "key_insight",
+        "actionPlan": "action_plan",
+        "cityScaleProjection": "city_scale_projection",
+        "recommendedPackaging": "recommended_packaging",
+        "sustainabilityReport": "sustainability_report",
+    }
+    normalized: dict[str, str] = {}
+    for key, value in payload.items():
+        normalized_key = aliases.get(str(key), str(key))
+        normalized[normalized_key] = str(value)
+    return normalized
 
 
 def _fallback_recommendation(group_details: dict[str, object], impact: dict[str, object]) -> dict[str, str]:
@@ -117,24 +159,29 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
     if not settings.gemini_api_key:
         return None
 
-    model = settings.gemini_model
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        f"?key={settings.gemini_api_key}"
-    )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2},
+        "generationConfig": {
+            "temperature": 0.2,
+            "response_mime_type": "application/json",
+        },
     }
 
-    def _request() -> dict[str, str] | None:
+    models_to_try = [settings.gemini_model, "gemini-1.5-flash"]
+    seen_models: set[str] = set()
+
+    def _request_with_model(model: str) -> dict[str, str] | None:
+        endpoint = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            f"?key={settings.gemini_api_key}"
+        )
         request = Request(
             endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(request, timeout=20.0) as response:
+        with urlopen(request, timeout=25.0) as response:
             data = json.loads(response.read().decode("utf-8"))
 
         candidates = data.get("candidates") or []
@@ -145,23 +192,32 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
         if not text:
             return None
 
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return {
-                "recommended_packaging": text,
-                "tradeoffs": "Review composting collection and material compliance requirements.",
-                "sustainability_report": "AI returned unstructured output; verify details against dashboard metrics.",
-            }
-
-        if not isinstance(parsed, dict):
+        parsed = _extract_json_object(text)
+        if not parsed:
+            logger.warning("Gemini output was not parseable JSON")
             return None
-        return {str(key): str(value) for key, value in parsed.items()}
+        return _normalize_output_keys(parsed)
 
-    try:
-        return await asyncio.to_thread(_request)
-    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return None
+    for model in models_to_try:
+        if not model or model in seen_models:
+            continue
+        seen_models.add(model)
+        try:
+            result = await asyncio.to_thread(_request_with_model, model)
+            if result:
+                return result
+        except HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            logger.warning("Gemini HTTP error model=%s status=%s body=%s", model, exc.code, body[:800])
+            continue
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            logger.warning("Gemini request failed model=%s error=%s", model, exc)
+            continue
+    return None
 
 
 async def build_group_recommendation(
