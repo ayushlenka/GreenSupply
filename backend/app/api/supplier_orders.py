@@ -23,6 +23,11 @@ async def list_supplier_orders_endpoint(
             total_units=row.total_units,
             business_count=row.business_count,
             status=row.status,
+            scheduled_start_at=row.scheduled_start_at,
+            estimated_end_at=row.estimated_end_at,
+            route_total_miles=row.route_total_miles,
+            route_total_minutes=row.route_total_minutes,
+            route_points=row.route_points,
             created_at=row.created_at,
         )
         for row in rows

@@ -14,6 +14,7 @@ from app.db.models.group_commitment import GroupCommitment
 from app.db.models.product import Product
 from app.db.models.supplier_confirmed_order import SupplierConfirmedOrder
 from app.db.models.supplier_product import SupplierProduct
+from app.service.delivery_route_service import compute_delivery_route, next_business_day_start_utc
 from app.service.email_service import send_group_confirmed_email
 from app.service.supplier_service import get_reserved_units_by_supplier_product
 from app.service.utils import safe_divide, to_float
@@ -220,6 +221,39 @@ async def _maybe_confirm_group(session: AsyncSession, group_id: str) -> None:
                 if supplier_product.available_units <= 0:
                     supplier_product.available_units = 0
                     supplier_product.status = "sold_out"
+
+            supplier = await session.get(Business, group.supplier_business_id)
+            route_points: list[list[float]] | None = None
+            route_total_miles: float | None = None
+            route_total_minutes: float | None = None
+            if supplier is not None and supplier.latitude is not None and supplier.longitude is not None:
+                commitment_businesses_result = await session.execute(
+                    select(Business)
+                    .join(GroupCommitment, GroupCommitment.business_id == Business.id)
+                    .where(GroupCommitment.group_id == group.id)
+                )
+                commitment_businesses = commitment_businesses_result.scalars().all()
+                delivery_stops = [
+                    (float(b.latitude), float(b.longitude))
+                    for b in commitment_businesses
+                    if b.latitude is not None and b.longitude is not None
+                ]
+            else:
+                delivery_stops = []
+
+            if delivery_stops:
+                route_points, route_total_miles, route_total_minutes = compute_delivery_route(
+                    supplier_latitude=float(supplier.latitude),
+                    supplier_longitude=float(supplier.longitude),
+                    destination_points=delivery_stops,
+                )
+
+            scheduled_start_at = next_business_day_start_utc()
+            estimated_end_at = (
+                scheduled_start_at + timedelta(minutes=route_total_minutes)
+                if route_total_minutes is not None
+                else None
+            )
             session.add(
                 SupplierConfirmedOrder(
                     id=str(uuid4()),
@@ -229,6 +263,11 @@ async def _maybe_confirm_group(session: AsyncSession, group_id: str) -> None:
                     total_units=current_units,
                     business_count=business_count,
                     status="confirmed",
+                    scheduled_start_at=scheduled_start_at,
+                    estimated_end_at=estimated_end_at,
+                    route_total_miles=route_total_miles,
+                    route_total_minutes=route_total_minutes,
+                    route_points=route_points,
                     created_at=datetime.utcnow(),
                 )
             )
@@ -352,9 +391,12 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
     )
 
     commitments_result = await session.execute(
-        select(GroupCommitment).where(GroupCommitment.group_id == group.id).order_by(GroupCommitment.created_at.asc())
+        select(GroupCommitment, Business)
+        .join(Business, Business.id == GroupCommitment.business_id)
+        .where(GroupCommitment.group_id == group.id)
+        .order_by(GroupCommitment.created_at.asc())
     )
-    commitments = commitments_result.scalars().all()
+    commitments = commitments_result.all()
     supplier_available_units = None
     if group.supplier_product_id:
         sp = await session.get(SupplierProduct, group.supplier_product_id)
@@ -372,6 +414,11 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
     if supplier_available_units is not None:
         max_capacity = min(max_capacity, supplier_available_units)
     remaining_units = max(0, max_capacity - int(metrics["current_units"]))
+
+    confirmed_order_result = await session.execute(
+        select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id == group.id)
+    )
+    confirmed_order = confirmed_order_result.scalar_one_or_none()
 
     return {
         "id": group.id,
@@ -400,11 +447,28 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
             {
                 "id": commitment.id,
                 "business_id": commitment.business_id,
+                "business_name": business.name,
+                "business_address": business.address,
+                "latitude": business.latitude,
+                "longitude": business.longitude,
                 "units": commitment.units,
                 "created_at": commitment.created_at,
             }
-            for commitment in commitments
+            for commitment, business in commitments
         ],
+        "confirmed_order": (
+            {
+                "id": confirmed_order.id,
+                "status": confirmed_order.status,
+                "scheduled_start_at": confirmed_order.scheduled_start_at,
+                "estimated_end_at": confirmed_order.estimated_end_at,
+                "route_total_miles": confirmed_order.route_total_miles,
+                "route_total_minutes": confirmed_order.route_total_minutes,
+                "route_points": confirmed_order.route_points,
+            }
+            if confirmed_order is not None
+            else None
+        ),
         **metrics,
     }
 

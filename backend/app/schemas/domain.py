@@ -70,6 +70,10 @@ class GroupJoinCreate(BaseModel):
 class GroupCommitmentRead(BaseModel):
     id: str
     business_id: str
+    business_name: str | None = None
+    business_address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     units: int
     created_at: datetime
 
@@ -101,6 +105,7 @@ class GroupRead(BaseModel):
 class GroupDetailRead(GroupRead):
     created_by_business_id: str
     commitments: list[GroupCommitmentRead]
+    confirmed_order: dict[str, Any] | None = None
 
 
 class ImpactRead(BaseModel):
@@ -146,4 +151,9 @@ class SupplierConfirmedOrderRead(BaseModel):
     total_units: int
     business_count: int
     status: str
+    scheduled_start_at: datetime | None = None
+    estimated_end_at: datetime | None = None
+    route_total_miles: float | None = None
+    route_total_minutes: float | None = None
+    route_points: list[list[float]] | None = None
     created_at: datetime

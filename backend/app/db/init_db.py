@@ -34,6 +34,11 @@ async def init_db() -> None:
             "ALTER TABLE buying_groups ADD COLUMN IF NOT EXISTS min_businesses_required INTEGER DEFAULT 5",
             "ALTER TABLE buying_groups ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
             "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS supplier_product_id VARCHAR(36)",
+            "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS scheduled_start_at TIMESTAMPTZ",
+            "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS estimated_end_at TIMESTAMPTZ",
+            "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS route_total_miles DOUBLE PRECISION",
+            "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS route_total_minutes DOUBLE PRECISION",
+            "ALTER TABLE supplier_confirmed_orders ADD COLUMN IF NOT EXISTS route_points JSONB",
         ]
         for ddl in statements:
             try:
