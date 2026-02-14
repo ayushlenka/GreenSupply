@@ -21,3 +21,7 @@
 
 Health endpoint:
 - `GET /api/v1/health`
+
+Authenticated endpoint:
+- `GET /api/v1/auth/me`
+- Requires `Authorization: Bearer <supabase_access_token>`
