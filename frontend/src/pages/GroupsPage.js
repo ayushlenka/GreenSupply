@@ -261,7 +261,9 @@ export default function GroupsPage({ auth }) {
     participants.forEach((commitment) => {
       const el = document.createElement('button');
       el.className = 'participant-dot';
-      el.title = commitment.business_name || 'Participating business';
+
+      const hoverPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: 'hover-popup' })
+        .setText(commitment.business_name || 'Participating business');
 
       const popupNode = document.createElement('div');
       popupNode.className = 'map-popup-card';
@@ -275,23 +277,28 @@ export default function GroupsPage({ auth }) {
         addr.textContent = commitment.business_address;
         popupNode.appendChild(addr);
       }
-      const units = document.createElement('p');
-      units.className = 'map-popup-sub';
-      units.textContent = `Committed: ${Number(commitment.units || 0).toLocaleString()} units`;
-      popupNode.appendChild(units);
 
-      const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 14 }).setDOMContent(popupNode);
+      const clickPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 14 }).setDOMContent(popupNode);
+
+      const lngLat = [Number(commitment.longitude), Number(commitment.latitude)];
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([Number(commitment.longitude), Number(commitment.latitude)])
-        .setPopup(popup)
+        .setLngLat(lngLat)
+        .setPopup(clickPopup)
         .addTo(map);
+
+      el.addEventListener('mouseenter', () => { if (!clickPopup.isOpen()) hoverPopup.setLngLat(lngLat).addTo(map); });
+      el.addEventListener('mouseleave', () => { hoverPopup.remove(); });
+      el.addEventListener('click', () => { hoverPopup.remove(); });
+
       participantMarkersRef.current.push(marker);
     });
 
     if (supplierBusiness && Number.isFinite(supplierBusiness.latitude) && Number.isFinite(supplierBusiness.longitude)) {
       const supplierEl = document.createElement('div');
       supplierEl.className = 'supplier-dot';
-      supplierEl.title = supplierBusiness.name || 'Supplier';
+
+      const supplierHoverPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 14, className: 'hover-popup' })
+        .setText(supplierBusiness.name || 'Supplier');
 
       const supplierPopupNode = document.createElement('div');
       supplierPopupNode.className = 'map-popup-card';
@@ -305,14 +312,19 @@ export default function GroupsPage({ auth }) {
         supplierAddr.textContent = supplierBusiness.address;
         supplierPopupNode.appendChild(supplierAddr);
       }
-      const supplierPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 14 }).setDOMContent(
+      const supplierClickPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: true, offset: 14 }).setDOMContent(
         supplierPopupNode
       );
 
+      const supplierLngLat = [Number(supplierBusiness.longitude), Number(supplierBusiness.latitude)];
       supplierMarkerRef.current = new mapboxgl.Marker({ element: supplierEl, anchor: 'center' })
-        .setLngLat([Number(supplierBusiness.longitude), Number(supplierBusiness.latitude)])
-        .setPopup(supplierPopup)
+        .setLngLat(supplierLngLat)
+        .setPopup(supplierClickPopup)
         .addTo(map);
+
+      supplierEl.addEventListener('mouseenter', () => { if (!supplierClickPopup.isOpen()) supplierHoverPopup.setLngLat(supplierLngLat).addTo(map); });
+      supplierEl.addEventListener('mouseleave', () => { supplierHoverPopup.remove(); });
+      supplierEl.addEventListener('click', () => { supplierHoverPopup.remove(); });
     }
 
     const allPoints = [

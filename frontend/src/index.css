@@ -27,8 +27,8 @@ body {
 }
 
 .participant-dot {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border: 2px solid #f5f0e8;
   border-radius: 999px;
   background: #2ad58b;
@@ -37,12 +37,13 @@ body {
 }
 
 .supplier-dot {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border: 2px solid #f5f0e8;
   border-radius: 999px;
   background: #3a6bff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
 }
 
 .truck-dot {
@@ -52,6 +53,20 @@ body {
   background: #f6b10a;
   border: 2px solid #fff6df;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.hover-popup .mapboxgl-popup-content {
+  background: #1c2b22;
+  color: #f5f0e8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hover-popup .mapboxgl-popup-tip {
+  border-top-color: #1c2b22;
 }
 
 .map-popup-card {
