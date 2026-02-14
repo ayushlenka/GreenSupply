@@ -3,13 +3,29 @@ import { useEffect, useState } from 'react';
 import { createSupplierProduct, fetchSupplierOrders, fetchSupplierProducts } from '../api';
 import Navbar from '../components/Navbar';
 
+const PRODUCT_NAME_OPTIONS = [
+  '9x9 Bagasse Clamshell',
+  '12oz Compostable Cup',
+  'Cold Cup Lid (PLA)',
+  '8oz Soup Container',
+  'Fiber Tray',
+  'Takeout Paper Bag',
+  'Compostable Fork',
+  'Compostable Spoon',
+  'Compostable Straw',
+  'Kraft Napkin'
+];
+
+const CATEGORY_OPTIONS = ['container', 'cup', 'clamshell', 'tray', 'bag', 'utensil', 'straw', 'napkin'];
+const MATERIAL_OPTIONS = ['compostable fiber', 'bagasse', 'paper', 'kraft paper', 'molded fiber', 'CPLA', 'PLA', 'recycled paper'];
+
 const INIT_FORM = {
-  name: '',
+  name: '9x9 Bagasse Clamshell',
   category: 'container',
   material: 'compostable fiber',
   available_units: 5000,
   unit_price: 0.25,
-  min_order_units: 500
+  min_order_units: 1
 };
 
 export default function SupplierPage({ auth }) {
@@ -83,12 +99,74 @@ export default function SupplierPage({ auth }) {
           <article className="rounded-xl border border-black/10 bg-white p-5">
             <h2 className="text-lg font-semibold">Add Product Inventory</h2>
             <form className="mt-4 grid grid-cols-1 gap-3" onSubmit={onCreate}>
-              <input value={form.name} onChange={onChange('name')} placeholder="Product name" className="rounded border border-black/15 px-3 py-2" required />
-              <input value={form.category} onChange={onChange('category')} placeholder="Category" className="rounded border border-black/15 px-3 py-2" required />
-              <input value={form.material} onChange={onChange('material')} placeholder="Material" className="rounded border border-black/15 px-3 py-2" required />
-              <input type="number" value={form.available_units} onChange={onChange('available_units')} placeholder="Available units" className="rounded border border-black/15 px-3 py-2" required />
-              <input type="number" step="0.01" value={form.unit_price} onChange={onChange('unit_price')} placeholder="Unit price" className="rounded border border-black/15 px-3 py-2" required />
-              <input type="number" value={form.min_order_units} onChange={onChange('min_order_units')} placeholder="Min order units" className="rounded border border-black/15 px-3 py-2" required />
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Product Name</span>
+                <select value={form.name} onChange={onChange('name')} className="w-full rounded border border-black/15 bg-white px-3 py-2" required>
+                  {PRODUCT_NAME_OPTIONS.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Category</span>
+                <select
+                  value={form.category}
+                  onChange={onChange('category')}
+                  className="w-full rounded border border-black/15 bg-white px-3 py-2"
+                  required
+                >
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Material</span>
+                <select
+                  value={form.material}
+                  onChange={onChange('material')}
+                  className="w-full rounded border border-black/15 bg-white px-3 py-2"
+                  required
+                >
+                  {MATERIAL_OPTIONS.map((material) => (
+                    <option key={material} value={material}>
+                      {material}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Available Units</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.available_units}
+                  onChange={onChange('available_units')}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                  required
+                />
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Unit Price (USD)</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={form.unit_price}
+                  onChange={onChange('unit_price')}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                  required
+                />
+              </label>
+
               <button className="rounded bg-moss px-4 py-2 text-sm font-semibold text-white disabled:opacity-60" disabled={saving}>
                 {saving ? 'Saving...' : 'Add Product'}
               </button>
@@ -106,7 +184,7 @@ export default function SupplierPage({ auth }) {
                 {orders.map((o) => (
                   <li key={o.id} className="rounded border border-black/10 p-3">
                     <p className="font-medium">Group {o.group_id}</p>
-                    <p className="text-ink/70">Units: {o.total_units} · Businesses: {o.business_count}</p>
+                    <p className="text-ink/70">Units: {o.total_units} | Businesses: {o.business_count}</p>
                   </li>
                 ))}
               </ul>
@@ -125,7 +203,7 @@ export default function SupplierPage({ auth }) {
               {products.map((p) => (
                 <article key={p.id} className="rounded border border-black/10 p-3 text-sm">
                   <p className="font-semibold">{p.name}</p>
-                  <p className="text-ink/70">{p.category} · {p.material}</p>
+                  <p className="text-ink/70">{p.category} | {p.material}</p>
                   <p className="text-ink/70">Available: {p.available_units}</p>
                   <p className="text-ink/70">Unit price: ${Number(p.unit_price).toFixed(2)}</p>
                   <p className="text-ink/70">Status: {p.status}</p>
