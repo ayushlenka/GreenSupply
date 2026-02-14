@@ -20,7 +20,11 @@ if is_supabase_pooler and parsed.port == 5432:
     netloc = parsed.netloc.replace(":5432", ":6543")
     database_url = urlunparse(parsed._replace(netloc=netloc))
 
-connect_args: dict[str, object] = {"timeout": settings.db_connect_timeout_seconds}
+connect_args: dict[str, object] = {
+    "timeout": settings.db_connect_timeout_seconds,
+    "statement_cache_size": 0,
+    "prepared_statement_cache_size": 0,
+}
 if "supabase.com" in (parsed.hostname or ""):
     ssl_context = ssl.create_default_context()
     if not settings.db_ssl_verify:
