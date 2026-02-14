@@ -26,6 +26,10 @@ export function fetchGroups() {
   return request('/groups');
 }
 
+export function fetchRegions() {
+  return request('/regions');
+}
+
 export function fetchGroupDetail(groupId) {
   return request(`/groups/${groupId}`);
 }
