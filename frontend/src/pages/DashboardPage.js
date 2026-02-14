@@ -73,15 +73,15 @@ export default function DashboardPage({ auth }) {
             <section className="mt-8 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">Gemini Impact Brief</h2>
-                  <p className="text-sm text-ink/65">Generate a demo-ready sustainability summary from current dashboard metrics.</p>
+                  <h2 className="text-lg font-semibold">AI Sustainability Insights</h2>
+                  <p className="text-sm text-ink/65">Generate operational recommendations from current impact and participation data.</p>
                 </div>
                 <button
                   onClick={generateAiSummary}
                   disabled={aiLoading}
                   className="rounded bg-moss px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-sage disabled:opacity-60"
                 >
-                  {aiLoading ? 'Generating...' : 'Generate AI Summary'}
+                  {aiLoading ? 'Generating...' : 'Generate Insights'}
                 </button>
               </div>
 
@@ -110,7 +110,7 @@ export default function DashboardPage({ auth }) {
                   </article>
 
                   <p className="text-xs uppercase tracking-[0.08em] text-ink/55 md:col-span-2">
-                    Source: {aiSummary.source}
+                    Powered by: {aiSummary.source}
                   </p>
                 </div>
               ) : null}

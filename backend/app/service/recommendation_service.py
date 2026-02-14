@@ -60,16 +60,16 @@ def _dashboard_fallback_recommendation(
     audience = business_name or "your business network"
     return {
         "executive_summary": (
-            f"For {audience}, current GreenSupply participation is saving about ${summary['total_savings_usd']:.2f}, "
-            f"avoiding {summary['total_co2_kg']:.2f} kg CO2, and preventing {summary['total_plastic_kg']:.2f} kg plastic."
+            f"{audience} is building measurable procurement momentum; the next gains come from moving active groups "
+            "to confirmation faster and concentrating participation in high-volume categories."
         ),
         "key_insight": (
-            f"Delivery consolidation is reducing about {summary['total_trips_reduced']} trips and {summary['total_miles_saved']:.1f} miles, "
-            "which compounds quickly as more businesses join."
+            f"There are {summary['near_completion_groups']} groups close to completion and {summary['stalled_groups']} groups "
+            "at risk of stalling, so focused outreach can unlock impact faster than opening many new groups."
         ),
         "action_plan": (
-            "Prioritize high-volume packaging categories, expand commitments in already-active groups, and onboard nearby peers "
-            "to fill groups faster and lock in supplier pricing."
+            "Prioritize near-complete groups first, run targeted outreach to under-filled groups, and standardize preferred "
+            "supplier SKUs so repeat orders become easier for businesses to join."
         ),
         "city_scale_projection": (
             f"If {city_businesses} SF businesses participate at similar rates, yearly impact is estimated at "
@@ -87,13 +87,19 @@ def _build_dashboard_prompt(
 ) -> str:
     audience = business_name or "small SF businesses"
     return (
-        "You are a climate-impact analyst for a cooperative procurement platform.\n"
+        "You are a climate-impact and operations analyst for a cooperative procurement platform.\n"
         "Return valid JSON with keys: executive_summary, key_insight, action_plan, city_scale_projection.\n"
-        "Keep each value concise, concrete, and demo-ready.\n"
+        "Keep each value concise and production-oriented for business users.\n"
+        "Do not simply restate all metrics; prioritize interpretation, bottlenecks, and next actions.\n"
+        "Use numbers selectively for decisions.\n"
         "Do not invent numbers not provided below.\n\n"
         f"Audience: {audience}\n"
         f"Active groups: {summary['active_groups']}\n"
+        f"Confirmed groups: {summary['confirmed_groups']}\n"
         f"Participating businesses: {summary['businesses_participating']}\n"
+        f"Average group progress pct: {summary['avg_group_progress_pct']}\n"
+        f"Near-completion groups: {summary['near_completion_groups']}\n"
+        f"Stalled groups: {summary['stalled_groups']}\n"
         f"Total savings USD: {summary['total_savings_usd']}\n"
         f"Total CO2 reduced kg: {summary['total_co2_kg']}\n"
         f"Total plastic avoided kg: {summary['total_plastic_kg']}\n"
@@ -195,6 +201,26 @@ async def build_dashboard_recommendation(
     total_plastic_kg = float(sum(float(g.get("estimated_plastic_avoided_kg", 0.0)) for g in groups))
     total_trips_reduced = int(sum(int(g.get("delivery_trips_reduced", 0)) for g in groups))
     total_miles_saved = float(sum(float(g.get("delivery_miles_saved", 0.0)) for g in groups))
+    confirmed_groups = int(sum(1 for g in groups if str(g.get("status", "")).lower() == "confirmed"))
+    avg_group_progress_pct = float(
+        sum(float(g.get("progress_pct", 0.0)) for g in groups) / max(1, len(groups))
+    )
+    near_completion_groups = int(
+        sum(
+            1
+            for g in groups
+            if str(g.get("status", "")).lower() == "active"
+            and float(g.get("progress_pct", 0.0)) >= 80.0
+        )
+    )
+    stalled_groups = int(
+        sum(
+            1
+            for g in groups
+            if str(g.get("status", "")).lower() == "active"
+            and float(g.get("progress_pct", 0.0)) < 30.0
+        )
+    )
 
     settings = get_settings()
     projected_businesses = city_businesses or settings.city_projection_businesses
@@ -203,7 +229,11 @@ async def build_dashboard_recommendation(
 
     summary = {
         "active_groups": len(groups),
+        "confirmed_groups": confirmed_groups,
         "businesses_participating": businesses_participating,
+        "avg_group_progress_pct": round(avg_group_progress_pct, 2),
+        "near_completion_groups": near_completion_groups,
+        "stalled_groups": stalled_groups,
         "total_savings_usd": round(total_savings_usd, 2),
         "total_co2_kg": round(total_co2_kg, 4),
         "total_plastic_kg": round(total_plastic_kg, 4),
