@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app.api.recommend import recommend_endpoint
-from app.schemas.recommendation import RecommendationRequest
+from app.api.recommend import recommend_dashboard_endpoint, recommend_endpoint
+from app.schemas.recommendation import DashboardRecommendationRequest, RecommendationRequest
 
 
 class TestRecommendApi(unittest.IsolatedAsyncioTestCase):
@@ -39,3 +39,22 @@ class TestRecommendApi(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertEqual(ctx.exception.detail, "Group not found")
+
+    async def test_recommend_dashboard_endpoint_success(self):
+        payload = DashboardRecommendationRequest(business_name="Mission Cafe")
+        service_response = {
+            "source": "fallback",
+            "executive_summary": "Summary",
+            "key_insight": "Insight",
+            "action_plan": "Plan",
+            "city_scale_projection": "Projection",
+        }
+
+        with patch(
+            "app.api.recommend.build_dashboard_recommendation",
+            new=AsyncMock(return_value=service_response),
+        ):
+            result = await recommend_dashboard_endpoint(payload, db=object())
+
+        self.assertEqual(result.source, "fallback")
+        self.assertEqual(result.executive_summary, "Summary")

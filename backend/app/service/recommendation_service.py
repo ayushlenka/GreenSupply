@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.service.group_service import get_group_details, get_group_impact
+from app.service.group_service import get_group_details, get_group_impact, list_active_groups
 
 
 def _fallback_recommendation(group_details: dict[str, object], impact: dict[str, object]) -> dict[str, str]:
@@ -48,6 +48,61 @@ def _build_prompt(group_details: dict[str, object], impact: dict[str, object], c
         f"Estimated plastic avoided kg: {impact['estimated_plastic_avoided_kg']}\n"
         f"Delivery miles saved: {impact['delivery_miles_saved']}\n"
         f"Constraints: {constraints_text}\n"
+    )
+
+
+def _dashboard_fallback_recommendation(
+    summary: dict[str, float | int],
+    *,
+    city_businesses: int,
+    business_name: str | None,
+) -> dict[str, str]:
+    audience = business_name or "your business network"
+    return {
+        "executive_summary": (
+            f"For {audience}, current GreenSupply participation is saving about ${summary['total_savings_usd']:.2f}, "
+            f"avoiding {summary['total_co2_kg']:.2f} kg CO2, and preventing {summary['total_plastic_kg']:.2f} kg plastic."
+        ),
+        "key_insight": (
+            f"Delivery consolidation is reducing about {summary['total_trips_reduced']} trips and {summary['total_miles_saved']:.1f} miles, "
+            "which compounds quickly as more businesses join."
+        ),
+        "action_plan": (
+            "Prioritize high-volume packaging categories, expand commitments in already-active groups, and onboard nearby peers "
+            "to fill groups faster and lock in supplier pricing."
+        ),
+        "city_scale_projection": (
+            f"If {city_businesses} SF businesses participate at similar rates, yearly impact is estimated at "
+            f"{summary['city_yearly_co2_kg']:.2f} kg CO2 avoided, {summary['city_yearly_plastic_kg']:.2f} kg plastic avoided, "
+            f"and {summary['city_yearly_miles_saved']:.2f} delivery miles saved."
+        ),
+    }
+
+
+def _build_dashboard_prompt(
+    summary: dict[str, float | int],
+    *,
+    city_businesses: int,
+    business_name: str | None,
+) -> str:
+    audience = business_name or "small SF businesses"
+    return (
+        "You are a climate-impact analyst for a cooperative procurement platform.\n"
+        "Return valid JSON with keys: executive_summary, key_insight, action_plan, city_scale_projection.\n"
+        "Keep each value concise, concrete, and demo-ready.\n"
+        "Do not invent numbers not provided below.\n\n"
+        f"Audience: {audience}\n"
+        f"Active groups: {summary['active_groups']}\n"
+        f"Participating businesses: {summary['businesses_participating']}\n"
+        f"Total savings USD: {summary['total_savings_usd']}\n"
+        f"Total CO2 reduced kg: {summary['total_co2_kg']}\n"
+        f"Total plastic avoided kg: {summary['total_plastic_kg']}\n"
+        f"Delivery trips reduced: {summary['total_trips_reduced']}\n"
+        f"Delivery miles saved: {summary['total_miles_saved']}\n"
+        f"City businesses projection input: {city_businesses}\n"
+        f"Projected yearly CO2 reduced kg: {summary['city_yearly_co2_kg']}\n"
+        f"Projected yearly plastic avoided kg: {summary['city_yearly_plastic_kg']}\n"
+        f"Projected yearly delivery miles saved: {summary['city_yearly_miles_saved']}\n"
     )
 
 
@@ -93,14 +148,9 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
                 "sustainability_report": "AI returned unstructured output; verify details against dashboard metrics.",
             }
 
-        required = {"recommended_packaging", "tradeoffs", "sustainability_report"}
-        if not required.issubset(parsed.keys()):
+        if not isinstance(parsed, dict):
             return None
-        return {
-            "recommended_packaging": str(parsed["recommended_packaging"]),
-            "tradeoffs": str(parsed["tradeoffs"]),
-            "sustainability_report": str(parsed["sustainability_report"]),
-        }
+        return {str(key): str(value) for key, value in parsed.items()}
 
     try:
         return await asyncio.to_thread(_request)
@@ -124,8 +174,59 @@ async def build_group_recommendation(
 
     prompt = _build_prompt(group_details, impact, constraints)
     gemini_result = await _call_gemini(prompt)
-    if gemini_result:
+    required = {"recommended_packaging", "tradeoffs", "sustainability_report"}
+    if gemini_result and required.issubset(gemini_result.keys()):
         return {"group_id": group_id, "source": "gemini", **gemini_result}
 
     fallback = _fallback_recommendation(group_details, impact)
     return {"group_id": group_id, "source": "fallback", **fallback}
+
+
+async def build_dashboard_recommendation(
+    session: AsyncSession,
+    *,
+    business_name: str | None = None,
+    city_businesses: int | None = None,
+) -> dict[str, str]:
+    groups = await list_active_groups(session)
+    businesses_participating = int(sum(int(g.get("business_count", 0)) for g in groups))
+    total_savings_usd = float(sum(float(g.get("estimated_savings_usd", 0.0)) for g in groups))
+    total_co2_kg = float(sum(float(g.get("estimated_co2_saved_kg", 0.0)) for g in groups))
+    total_plastic_kg = float(sum(float(g.get("estimated_plastic_avoided_kg", 0.0)) for g in groups))
+    total_trips_reduced = int(sum(int(g.get("delivery_trips_reduced", 0)) for g in groups))
+    total_miles_saved = float(sum(float(g.get("delivery_miles_saved", 0.0)) for g in groups))
+
+    settings = get_settings()
+    projected_businesses = city_businesses or settings.city_projection_businesses
+    scale_denominator = max(1, businesses_participating)
+    scale_factor = projected_businesses / scale_denominator
+
+    summary = {
+        "active_groups": len(groups),
+        "businesses_participating": businesses_participating,
+        "total_savings_usd": round(total_savings_usd, 2),
+        "total_co2_kg": round(total_co2_kg, 4),
+        "total_plastic_kg": round(total_plastic_kg, 4),
+        "total_trips_reduced": total_trips_reduced,
+        "total_miles_saved": round(total_miles_saved, 2),
+        "city_yearly_co2_kg": round(total_co2_kg * scale_factor * 12, 2),
+        "city_yearly_plastic_kg": round(total_plastic_kg * scale_factor * 12, 2),
+        "city_yearly_miles_saved": round(total_miles_saved * scale_factor * 12, 2),
+    }
+
+    prompt = _build_dashboard_prompt(
+        summary,
+        city_businesses=projected_businesses,
+        business_name=business_name,
+    )
+    gemini_result = await _call_gemini(prompt)
+    required = {"executive_summary", "key_insight", "action_plan", "city_scale_projection"}
+    if gemini_result and required.issubset(gemini_result.keys()):
+        return {"source": "gemini", **gemini_result}
+
+    fallback = _dashboard_fallback_recommendation(
+        summary,
+        city_businesses=projected_businesses,
+        business_name=business_name,
+    )
+    return {"source": "fallback", **fallback}

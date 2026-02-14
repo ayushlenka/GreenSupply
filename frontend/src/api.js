@@ -79,6 +79,13 @@ export function fetchRecommendation(groupId, constraints) {
   });
 }
 
+export function fetchDashboardRecommendation(payload = {}) {
+  return request('/recommend/dashboard', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createSupplierProduct(payload) {
   return request('/supplier-products', {
     method: 'POST',

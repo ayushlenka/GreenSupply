@@ -1,8 +1,7 @@
-from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.service.recommendation_service import build_group_recommendation
+from app.service.recommendation_service import build_dashboard_recommendation, build_group_recommendation
 
 
 class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
@@ -74,3 +73,47 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
                 await build_group_recommendation(session=object(), group_id="missing")
 
         self.assertEqual(str(ctx.exception), "Group not found")
+
+    async def test_dashboard_recommendation_fallback(self):
+        groups = [
+            {
+                "business_count": 2,
+                "estimated_savings_usd": 100.0,
+                "estimated_co2_saved_kg": 20.0,
+                "estimated_plastic_avoided_kg": 10.0,
+                "delivery_trips_reduced": 1,
+                "delivery_miles_saved": 5.0,
+            }
+        ]
+
+        with patch("app.service.recommendation_service.list_active_groups", new=AsyncMock(return_value=groups), create=True), \
+             patch("app.service.recommendation_service._call_gemini", new=AsyncMock(return_value=None)):
+            result = await build_dashboard_recommendation(session=object(), business_name="Mission Cafe")
+
+        self.assertEqual(result["source"], "fallback")
+        self.assertIn("executive_summary", result)
+
+    async def test_dashboard_recommendation_gemini(self):
+        groups = [
+            {
+                "business_count": 3,
+                "estimated_savings_usd": 200.0,
+                "estimated_co2_saved_kg": 30.0,
+                "estimated_plastic_avoided_kg": 12.0,
+                "delivery_trips_reduced": 2,
+                "delivery_miles_saved": 7.0,
+            }
+        ]
+        gemini = {
+            "executive_summary": "Summary",
+            "key_insight": "Insight",
+            "action_plan": "Plan",
+            "city_scale_projection": "Projection",
+        }
+
+        with patch("app.service.recommendation_service.list_active_groups", new=AsyncMock(return_value=groups), create=True), \
+             patch("app.service.recommendation_service._call_gemini", new=AsyncMock(return_value=gemini)):
+            result = await build_dashboard_recommendation(session=object())
+
+        self.assertEqual(result["source"], "gemini")
+        self.assertEqual(result["key_insight"], "Insight")
