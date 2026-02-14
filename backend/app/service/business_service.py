@@ -14,21 +14,31 @@ async def create_business(
     *,
     name: str | None,
     email: str | None,
-    business_type: str,
+    business_type: str | None,
     account_type: str,
     address: str | None,
-    neighborhood: str,
+    city: str | None,
+    state: str | None,
+    neighborhood: str | None,
     zip_code: str | None,
     latitude: float | None,
     longitude: float | None,
 ) -> Business:
     if account_type not in {"business", "supplier"}:
         raise ValueError("account_type must be either 'business' or 'supplier'")
+    if account_type == "business" and not business_type:
+        raise ValueError("business_type is required for business accounts")
+
+    normalized_business_type = "supplier" if account_type == "supplier" else str(business_type).strip().lower()
+    normalized_city = city.strip() if city else None
+    normalized_state = state.strip() if state else None
+    normalized_neighborhood = neighborhood.strip() if neighborhood else normalized_city
 
     resolved_latitude = latitude
     resolved_longitude = longitude
     if resolved_latitude is None or resolved_longitude is None:
-        address_parts = [address, neighborhood, zip_code, "San Francisco, CA"]
+        location_country = "United States"
+        address_parts = [address, normalized_city, normalized_state, zip_code, location_country]
         geocode_input = ", ".join([part for part in address_parts if part])
         if geocode_input.strip():
             geo = geocode_address(geocode_input)
@@ -44,8 +54,11 @@ async def create_business(
                     and country in {"us", "united states"}
                     and postal_code.startswith("941")
                 )
-                if not in_sf:
+                in_us = country in {"us", "united states"}
+                if account_type == "business" and not in_sf:
                     raise ValueError("Address geocoded outside San Francisco; only SF businesses are supported")
+                if account_type == "supplier" and not in_us:
+                    raise ValueError("Supplier address must be inside the United States")
 
                 resolved_latitude = float(geo["latitude"])
                 resolved_longitude = float(geo["longitude"])
@@ -62,10 +75,12 @@ async def create_business(
         id=str(uuid4()),
         name=name,
         email=(email.strip().lower() if email else None),
-        business_type=business_type,
+        business_type=normalized_business_type,
         account_type=account_type,
         address=address,
-        neighborhood=neighborhood,
+        city=normalized_city,
+        state=normalized_state,
+        neighborhood=normalized_neighborhood or "unknown",
         zip=zip_code,
         latitude=resolved_latitude,
         longitude=resolved_longitude,
@@ -80,4 +95,10 @@ async def create_business(
 
 async def get_business_by_id(session: AsyncSession, business_id: str) -> Business | None:
     result = await session.execute(select(Business).where(Business.id == business_id))
+    return result.scalar_one_or_none()
+
+
+async def get_business_by_email(session: AsyncSession, email: str) -> Business | None:
+    normalized = email.strip().lower()
+    result = await session.execute(select(Business).where(Business.email == normalized))
     return result.scalar_one_or_none()
