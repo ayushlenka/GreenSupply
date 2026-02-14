@@ -85,6 +85,7 @@ class GroupRead(BaseModel):
     confirmed_at: datetime | None = None
     deadline: datetime | None = None
     target_units: int
+    remaining_units: int | None = None
     current_units: int
     business_count: int
     progress_pct: float

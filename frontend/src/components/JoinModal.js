@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 
 export default function JoinModal({ group, open, onClose, onSubmit }) {
   const [units, setUnits] = useState('');
-  const [error, setError] = useState(false);
+  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (open) {
       setUnits('');
-      setError(false);
+      setError('');
       setSubmitting(false);
       setTimeout(() => inputRef.current?.focus(), 120);
     }
@@ -23,16 +23,33 @@ export default function JoinModal({ group, open, onClose, onSubmit }) {
   const savingsPerUnit = retail - bulk;
   const parsedUnits = parseInt(units, 10) || 0;
 
+  const maxAllowed = Math.max(
+    0,
+    Number.isFinite(group.remaining_units)
+      ? group.remaining_units
+      : (group.target_units || 0) - (group.current_units || 0)
+  );
+
   const totalSaved = parsedUnits > 0 ? (savingsPerUnit * parsedUnits).toFixed(2) : null;
   const pctOff = retail > 0 ? Math.round((1 - bulk / retail) * 100) : 0;
 
   const handleSubmit = async () => {
     if (parsedUnits < 1) {
-      setError(true);
+      setError('Enter at least 1 unit.');
       return;
     }
+    if (parsedUnits > maxAllowed) {
+      setError(`Max you can commit right now is ${maxAllowed} units.`);
+      return;
+    }
+
     setSubmitting(true);
-    await onSubmit(group.id, parsedUnits);
+    const result = await onSubmit(group.id, parsedUnits);
+    if (result?.ok === false) {
+      setError(result.message || 'Unable to join group.');
+      setSubmitting(false);
+      return;
+    }
     setSubmitting(false);
   };
 
@@ -49,6 +66,7 @@ export default function JoinModal({ group, open, onClose, onSubmit }) {
         <p className="text-xs uppercase tracking-[0.12em] text-sage">Join Buying Group</p>
         <h2 className="mt-1 text-2xl font-semibold text-ink">{product.name || 'Product'}</h2>
         <p className="mt-1 text-sm text-ink/60">{product.category || ''}</p>
+        <p className="mt-1 text-sm text-ink/70">Remaining capacity: {maxAllowed} units</p>
 
         <div className="mt-6">
           <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">
@@ -59,13 +77,12 @@ export default function JoinModal({ group, open, onClose, onSubmit }) {
             type="number"
             placeholder="e.g. 200"
             min="1"
+            max={maxAllowed}
             value={units}
-            className={`w-full rounded border px-3 py-2 outline-none ${
-              error && parsedUnits < 1 ? 'border-red-500' : 'border-black/20 focus:border-moss'
-            }`}
+            className={`w-full rounded border px-3 py-2 outline-none ${error ? 'border-red-500' : 'border-black/20 focus:border-moss'}`}
             onChange={(e) => {
               setUnits(e.target.value);
-              setError(false);
+              setError('');
             }}
           />
         </div>
@@ -76,12 +93,14 @@ export default function JoinModal({ group, open, onClose, onSubmit }) {
           <p className="text-xs text-moss/80">{totalSaved ? `${pctOff}% off retail` : 'Enter units to calculate'}</p>
         </div>
 
+        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+
         <button
           className="mt-6 w-full rounded bg-moss px-3 py-2.5 text-sm font-semibold text-parchment transition hover:bg-sage disabled:cursor-not-allowed disabled:opacity-60"
           onClick={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || maxAllowed <= 0}
         >
-          {submitting ? 'Joining...' : 'Commit to Group'}
+          {submitting ? 'Joining...' : maxAllowed <= 0 ? 'Group Capacity Reached' : 'Commit to Group'}
         </button>
       </div>
     </div>

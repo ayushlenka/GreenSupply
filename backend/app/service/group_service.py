@@ -139,6 +139,19 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
     if group.status == "confirmed":
         raise ValueError("Group is already confirmed")
 
+    rollups = await _fetch_group_rollups(session, [group.id])
+    current_units = int(rollups.get(group.id, {}).get("current_units", 0))
+    max_units_allowed = int(group.target_units)
+    if group.supplier_product_id:
+        supplier_product = await session.get(SupplierProduct, group.supplier_product_id)
+        if not supplier_product:
+            raise ValueError("Supplier product not found")
+        max_units_allowed = min(max_units_allowed, int(supplier_product.available_units))
+
+    if current_units + units > max_units_allowed:
+        remaining = max(0, max_units_allowed - current_units)
+        raise ValueError(f"Requested units exceed remaining group capacity ({remaining} units left)")
+
     commitment = GroupCommitment(
         id=str(uuid4()),
         group_id=group_id,
@@ -252,6 +265,15 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
         product = products_by_group[group.id]
         rollup = rollups.get(group.id, {"current_units": 0, "business_count": 0})
         metrics = _build_group_metrics(product, rollup["current_units"], rollup["business_count"], group.target_units)
+        supplier_available_units = None
+        if group.supplier_product_id:
+            sp = await session.get(SupplierProduct, group.supplier_product_id)
+            supplier_available_units = int(sp.available_units) if sp is not None else None
+
+        max_capacity = int(group.target_units)
+        if supplier_available_units is not None:
+            max_capacity = min(max_capacity, supplier_available_units)
+        remaining_units = max(0, max_capacity - int(rollup["current_units"]))
 
         payload.append(
             {
@@ -260,15 +282,12 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
                 "region_id": group.region_id,
                 "supplier_business_id": group.supplier_business_id,
                 "supplier_product_id": group.supplier_product_id,
-                "supplier_available_units": (
-                    int(sp.available_units)
-                    if (sp := await session.get(SupplierProduct, group.supplier_product_id)) is not None
-                    else None
-                ),
+                "supplier_available_units": supplier_available_units,
                 "min_businesses_required": group.min_businesses_required,
                 "confirmed_at": group.confirmed_at,
                 "deadline": group.deadline,
                 "target_units": group.target_units,
+                "remaining_units": remaining_units,
                 "product": {
                     "id": product.id,
                     "name": product.name,
@@ -303,6 +322,14 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
         select(GroupCommitment).where(GroupCommitment.group_id == group.id).order_by(GroupCommitment.created_at.asc())
     )
     commitments = commitments_result.scalars().all()
+    supplier_available_units = None
+    if group.supplier_product_id:
+        sp = await session.get(SupplierProduct, group.supplier_product_id)
+        supplier_available_units = int(sp.available_units) if sp is not None else None
+    max_capacity = int(group.target_units)
+    if supplier_available_units is not None:
+        max_capacity = min(max_capacity, supplier_available_units)
+    remaining_units = max(0, max_capacity - int(metrics["current_units"]))
 
     return {
         "id": group.id,
@@ -310,13 +337,12 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
         "region_id": group.region_id,
         "supplier_business_id": group.supplier_business_id,
         "supplier_product_id": group.supplier_product_id,
-        "supplier_available_units": (
-            int(sp.available_units) if (sp := await session.get(SupplierProduct, group.supplier_product_id)) is not None else None
-        ),
+        "supplier_available_units": supplier_available_units,
         "min_businesses_required": group.min_businesses_required,
         "confirmed_at": group.confirmed_at,
         "deadline": group.deadline,
         "target_units": group.target_units,
+        "remaining_units": remaining_units,
         "created_by_business_id": group.created_by_business_id,
         "product": {
             "id": product.id,

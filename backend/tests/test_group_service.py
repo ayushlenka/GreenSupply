@@ -160,3 +160,30 @@ class TestGroupService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("insufficient", str(ctx.exception))
         self.assertEqual(group.status, "active")
         self.assertEqual(supplier_product.available_units, 40)
+
+    async def test_join_group_rejects_units_above_remaining_capacity(self):
+        group = SimpleNamespace(
+            id="g3",
+            status="active",
+            target_units=100,
+            supplier_product_id="sp3",
+            region_id=2,
+        )
+        business = SimpleNamespace(id="b1", account_type="business", region_id=2)
+        supplier_product = SimpleNamespace(id="sp3", available_units=95)
+        session = _Session(
+            gets={
+                ("BuyingGroup", "g3"): group,
+                ("Business", "b1"): business,
+                ("SupplierProduct", "sp3"): supplier_product,
+            }
+        )
+
+        with patch(
+            "app.service.group_service._fetch_group_rollups",
+            new=AsyncMock(return_value={"g3": {"current_units": 90, "business_count": 2}}),
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                await join_group(session, group_id="g3", business_id="b1", units=6)
+
+        self.assertIn("remaining group capacity", str(ctx.exception))

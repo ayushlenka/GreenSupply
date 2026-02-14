@@ -83,6 +83,9 @@ export function createSupplierProduct(payload) {
 }
 
 export function fetchSupplierProducts(supplierBusinessId) {
+  if (!supplierBusinessId) {
+    return request('/supplier-products');
+  }
   const query = new URLSearchParams({ supplier_business_id: supplierBusinessId });
   return request(`/supplier-products?${query.toString()}`);
 }

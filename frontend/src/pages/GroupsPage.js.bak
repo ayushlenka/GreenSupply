@@ -146,22 +146,15 @@ export default function GroupsPage({ auth }) {
   }, [activeId]);
 
   const handleJoin = async (groupId, units) => {
-    const businessId = auth?.profile?.id;
-    if (!businessId) {
-      return { ok: false, message: 'Business profile not found. Sign in again and retry.' };
-    }
-
     try {
-      await joinGroup(groupId, businessId, units);
+      await joinGroup(groupId, 'demo-business', units);
       setToast({ visible: true, message: `Joined! ${units.toLocaleString()} units committed.` });
       setModalGroup(null);
       const updated = await fetchGroups();
       setGroups(updated);
-      return { ok: true };
-    } catch (err) {
-      const message = String(err?.message || 'Unable to join right now. Try again.');
-      setToast({ visible: true, message });
-      return { ok: false, message };
+    } catch {
+      setToast({ visible: true, message: 'Unable to join right now. Try again.' });
+      setModalGroup(null);
     }
   };
 

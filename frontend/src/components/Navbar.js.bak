@@ -32,7 +32,7 @@ export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = t
                   Groups
                 </Link>
                 <Link to="/products" className={linkCls('/products')}>
-                  Orders
+                  Products
                 </Link>
                 <Link to="/dashboard" className={linkCls('/dashboard')}>
                   Dashboard

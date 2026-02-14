@@ -10,6 +10,10 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
 
   const deadline = group.deadline ? new Date(group.deadline) : null;
   const daysLeft = deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / (1000 * 60 * 60 * 24))) : null;
+  const remainingUnits = Number.isFinite(group.remaining_units)
+    ? group.remaining_units
+    : Math.max(0, (group.target_units || 0) - (group.current_units || 0));
+  const joinDisabled = group.status === 'confirmed' || remainingUnits <= 0;
 
   return (
     <article
@@ -44,17 +48,19 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-ink/70">
         <span>Save ${savingsPerUnit}/unit</span>
         <span>{group.business_count || 0} businesses</span>
+        <span>{remainingUnits} units left</span>
         {daysLeft !== null ? <span>{daysLeft}d left</span> : null}
       </div>
 
       <button
-        className="mt-4 w-full rounded bg-moss px-3 py-2 text-sm font-medium text-parchment transition hover:bg-sage"
+        className="mt-4 w-full rounded bg-moss px-3 py-2 text-sm font-medium text-parchment transition hover:bg-sage disabled:cursor-not-allowed disabled:opacity-60"
         onClick={(e) => {
           e.stopPropagation();
           onJoin(group);
         }}
+        disabled={joinDisabled}
       >
-        Join This Group
+        {joinDisabled ? 'Unavailable' : 'Join This Group'}
       </button>
     </article>
   );
