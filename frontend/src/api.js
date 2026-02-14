@@ -63,9 +63,31 @@ export function createBusiness(payload) {
   });
 }
 
+export function fetchBusinessByEmail(email) {
+  const query = new URLSearchParams({ email });
+  return request(`/businesses?${query.toString()}`);
+}
+
 export function fetchRecommendation(groupId, constraints) {
   return request('/recommend', {
     method: 'POST',
     body: JSON.stringify({ group_id: groupId, constraints }),
   });
+}
+
+export function createSupplierProduct(payload) {
+  return request('/supplier-products', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchSupplierProducts(supplierBusinessId) {
+  const query = new URLSearchParams({ supplier_business_id: supplierBusinessId });
+  return request(`/supplier-products?${query.toString()}`);
+}
+
+export function fetchSupplierOrders(supplierBusinessId) {
+  const query = new URLSearchParams({ supplier_business_id: supplierBusinessId });
+  return request(`/supplier-orders?${query.toString()}`);
 }

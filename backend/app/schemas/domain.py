@@ -7,10 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class BusinessCreate(BaseModel):
     name: str | None = None
     email: str | None = None
-    business_type: str
+    business_type: str | None = None
     account_type: str = "business"
     address: str | None = None
-    neighborhood: str
+    city: str | None = None
+    state: str | None = None
+    neighborhood: str | None = None
     zip_code: str | None = Field(default=None, alias="zip")
     latitude: float | None = None
     longitude: float | None = None
@@ -25,6 +27,8 @@ class BusinessRead(BaseModel):
     business_type: str
     account_type: str
     address: str | None = None
+    city: str | None = None
+    state: str | None = None
     neighborhood: str
     zip: str | None = None
     latitude: float | None = None

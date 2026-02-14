@@ -15,6 +15,8 @@ class Business(Base):
     business_type: Mapped[str] = mapped_column(String(100), nullable=False)
     account_type: Mapped[str] = mapped_column(String(30), nullable=False, default="business")
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(50), nullable=True)
     neighborhood: Mapped[str] = mapped_column(String(100), nullable=False)
     zip: Mapped[str | None] = mapped_column(String(20), nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -1,9 +1,35 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
 
+import { createBusiness } from '../api';
 import { getGoogleLoginUrl } from '../auth';
 import Navbar from '../components/Navbar';
 
+const BUSINESS_TYPE_OPTIONS = [
+  'cafe',
+  'restaurant',
+  'bakery',
+  'boba shop',
+  'food truck',
+  'grocery market',
+  'caterer',
+  'campus dining'
+];
+
+const INITIAL_FORM = {
+  name: '',
+  account_type: 'business',
+  business_type: 'cafe',
+  address: '',
+  city: 'San Francisco',
+  state: 'CA',
+  zip: ''
+};
+
 export default function HomePage({ auth }) {
+  const [form, setForm] = useState(INITIAL_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
   const handleGoogleLogin = () => {
     try {
       window.location.href = getGoogleLoginUrl();
@@ -12,9 +38,55 @@ export default function HomePage({ auth }) {
     }
   };
 
+  const onChange = (key) => (e) => {
+    const value = e.target.value;
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'account_type') {
+        if (value === 'supplier') {
+          next.business_type = 'supplier';
+        } else if (prev.business_type === 'supplier') {
+          next.business_type = 'cafe';
+          next.city = 'San Francisco';
+          next.state = 'CA';
+        }
+      }
+      return next;
+    });
+  };
+
+  const submitOnboarding = async (e) => {
+    e.preventDefault();
+    if (!auth?.user?.email) return;
+
+    setSubmitting(true);
+    setError('');
+    try {
+      const payload = {
+        ...form,
+        email: auth.user.email,
+      };
+      const business = await createBusiness(payload);
+      auth.onProfileCreated?.(business);
+    } catch (err) {
+      setError(String(err?.message || 'Failed to create account profile'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isBusiness = form.account_type === 'business';
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-emerald-50/40 to-emerald-100/30 text-ink">
-      <Navbar solid auth={auth} isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} showLinks={false} />
+      <Navbar
+        solid
+        auth={auth}
+        isAuthenticated={auth?.isAuthenticated}
+        onLogout={auth?.onLogout}
+        showLinks={Boolean(auth?.profile)}
+        accountType={auth?.profile?.account_type}
+      />
 
       <div className="pointer-events-none absolute -left-24 top-28 h-72 w-72 rounded-full bg-emerald-300/30 blur-3xl" />
       <div className="pointer-events-none absolute -right-24 top-40 h-96 w-96 rounded-full bg-green-200/40 blur-3xl" />
@@ -43,74 +115,91 @@ export default function HomePage({ auth }) {
           ) : null}
         </section>
 
-        <section className="mt-16 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <article className="rounded-2xl border border-emerald-100 bg-white/90 p-6 shadow-sm backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.1em] text-sage">Small Business Savings</p>
-            <p className="mt-2 text-3xl font-semibold text-moss">10-30%</p>
-            <p className="mt-1 text-sm text-ink/65">
-              Lower unit prices through shared purchasing power instead of solo ordering.
+        {auth?.isAuthenticated && !auth?.profile ? (
+          <section className="mx-auto mt-12 w-full max-w-3xl rounded-2xl border border-emerald-100 bg-white p-6 shadow-sm sm:p-8">
+            <h2 className="text-2xl font-semibold">Complete Account Setup</h2>
+            <p className="mt-2 text-sm text-ink/65">
+              Business accounts must be in San Francisco. Supplier accounts can be anywhere in the United States.
             </p>
-          </article>
-          <article className="rounded-2xl border border-emerald-100 bg-white/90 p-6 shadow-sm backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.1em] text-sage">Climate Impact</p>
-            <p className="mt-2 text-3xl font-semibold text-moss">CO2 Down</p>
-            <p className="mt-1 text-sm text-ink/65">
-              Consolidated routes reduce delivery miles and associated greenhouse emissions.
-            </p>
-          </article>
-          <article className="rounded-2xl border border-emerald-100 bg-white/90 p-6 shadow-sm backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.1em] text-sage">Better Choices</p>
-            <p className="mt-2 text-3xl font-semibold text-moss">Cleaner Materials</p>
-            <p className="mt-1 text-sm text-ink/65">
-              Compare compostable options with certifications and tradeoff insights.
-            </p>
-          </article>
-        </section>
 
-        <section className="mt-12 rounded-2xl border border-emerald-100 bg-white/95 p-6 shadow-sm sm:p-8">
-          <h2 className="text-2xl font-semibold text-ink">How It Works</h2>
-          <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em] text-sage">Step 1</p>
-              <p className="mt-1 text-lg font-semibold">Share Monthly Demand</p>
-              <p className="mt-1 text-sm text-ink/65">
-                Capture your packaging needs by product type and neighborhood.
-              </p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em] text-sage">Step 2</p>
-              <p className="mt-1 text-lg font-semibold">Join a Buying Group</p>
-              <p className="mt-1 text-sm text-ink/65">
-                Commit units with nearby businesses to hit supplier minimums.
-              </p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.1em] text-sage">Step 3</p>
-              <p className="mt-1 text-lg font-semibold">Track Real Impact</p>
-              <p className="mt-1 text-sm text-ink/65">
-                Monitor savings, CO2 reduced, plastic avoided, and delivery trips reduced.
-              </p>
-            </div>
-          </div>
-        </section>
+            <form className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={submitOnboarding}>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">Account Type</span>
+                <select
+                  value={form.account_type}
+                  onChange={onChange('account_type')}
+                  className="w-full rounded border border-black/15 bg-white px-3 py-2"
+                >
+                  <option value="business">Business</option>
+                  <option value="supplier">Supplier</option>
+                </select>
+              </label>
 
-        <section className="mt-10 rounded-2xl border border-emerald-100 bg-gradient-to-r from-white to-emerald-50 p-6 sm:p-8">
-          <h3 className="text-xl font-semibold">Built for local operators</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/70 sm:text-base">
-            From cafes and bakeries to food trucks and small restaurants, GreenSupply turns sustainability into an
-            operational advantage: lower costs, easier procurement decisions, and a clearer path to climate goals.
-          </p>
-          {auth?.isAuthenticated ? (
-            <div className="mt-5">
-              <Link
-                to="/groups"
-                className="inline-flex rounded-full border border-moss bg-white px-5 py-2.5 text-sm font-semibold text-moss transition hover:bg-moss hover:text-white"
+              <label>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">Business Name</span>
+                <input value={form.name} onChange={onChange('name')} className="w-full rounded border border-black/15 px-3 py-2" />
+              </label>
+
+              <label>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">Business Type</span>
+                {isBusiness ? (
+                  <select
+                    value={form.business_type}
+                    onChange={onChange('business_type')}
+                    className="w-full rounded border border-black/15 bg-white px-3 py-2"
+                  >
+                    {BUSINESS_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value="supplier"
+                    disabled
+                    className="w-full rounded border border-black/15 bg-black/5 px-3 py-2 text-ink/65"
+                  />
+                )}
+              </label>
+
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">Street Address</span>
+                <input
+                  value={form.address}
+                  onChange={onChange('address')}
+                  placeholder={isBusiness ? 'SF street address' : 'US street address'}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                />
+              </label>
+
+              <label>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">City</span>
+                <input value={form.city} onChange={onChange('city')} className="w-full rounded border border-black/15 px-3 py-2" />
+              </label>
+
+              <label>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">State</span>
+                <input value={form.state} onChange={onChange('state')} className="w-full rounded border border-black/15 px-3 py-2" />
+              </label>
+
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/65">ZIP</span>
+                <input value={form.zip} onChange={onChange('zip')} className="w-full rounded border border-black/15 px-3 py-2" />
+              </label>
+
+              {error ? <p className="sm:col-span-2 text-sm text-red-600">{error}</p> : null}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="sm:col-span-2 rounded bg-moss px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white disabled:opacity-60"
               >
-                Go to Groups
-              </Link>
-            </div>
-          ) : null}
-        </section>
+                {submitting ? 'Saving...' : 'Create Account Profile'}
+              </button>
+            </form>
+          </section>
+        ) : null}
       </main>
     </div>
   );

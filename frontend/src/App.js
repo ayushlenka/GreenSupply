@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import HomePage from './pages/HomePage';
-import GroupsPage from './pages/GroupsPage';
-import ProductsPage from './pages/ProductsPage';
-import DashboardPage from './pages/DashboardPage';
-import ProtectedRoute from './components/ProtectedRoute';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+
+import { fetchBusinessByEmail, fetchMe } from './api';
 import { clearStoredToken, getStoredToken, readTokenFromUrlHash } from './auth';
-import { fetchMe } from './api';
+import ProtectedRoute from './components/ProtectedRoute';
+import DashboardPage from './pages/DashboardPage';
+import GroupsPage from './pages/GroupsPage';
+import HomePage from './pages/HomePage';
+import ProductsPage from './pages/ProductsPage';
+import SupplierPage from './pages/SupplierPage';
 
 function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
 
   useEffect(() => {
     const hashToken = readTokenFromUrlHash();
@@ -23,6 +26,7 @@ function App() {
   useEffect(() => {
     if (!token) {
       setUser(null);
+      setProfile(null);
       return;
     }
 
@@ -32,30 +36,49 @@ function App() {
         clearStoredToken();
         setToken(null);
         setUser(null);
+        setProfile(null);
       });
   }, [token]);
+
+  useEffect(() => {
+    if (!user?.email) {
+      setProfile(null);
+      return;
+    }
+
+    fetchBusinessByEmail(user.email)
+      .then((business) => setProfile(business))
+      .catch(() => setProfile(null));
+  }, [user]);
 
   const auth = useMemo(
     () => ({
       isAuthenticated: Boolean(token && user),
       user,
+      profile,
+      onProfileCreated: (newProfile) => setProfile(newProfile),
       onLogout: () => {
         clearStoredToken();
         setToken(null);
         setUser(null);
+        setProfile(null);
       }
     }),
-    [token, user]
+    [token, user, profile]
   );
+
+  const businessAllowed = auth.isAuthenticated && auth.profile?.account_type === 'business';
+  const supplierAllowed = auth.isAuthenticated && auth.profile?.account_type === 'supplier';
 
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage auth={auth} />} />
+
         <Route
           path="/groups"
           element={
-            <ProtectedRoute isAuthenticated={auth.isAuthenticated}>
+            <ProtectedRoute isAuthenticated={businessAllowed}>
               <GroupsPage auth={auth} />
             </ProtectedRoute>
           }
@@ -63,7 +86,7 @@ function App() {
         <Route
           path="/products"
           element={
-            <ProtectedRoute isAuthenticated={auth.isAuthenticated}>
+            <ProtectedRoute isAuthenticated={businessAllowed}>
               <ProductsPage auth={auth} />
             </ProtectedRoute>
           }
@@ -71,11 +94,21 @@ function App() {
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute isAuthenticated={auth.isAuthenticated}>
+            <ProtectedRoute isAuthenticated={businessAllowed}>
               <DashboardPage auth={auth} />
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/supplier"
+          element={
+            <ProtectedRoute isAuthenticated={supplierAllowed}>
+              <SupplierPage auth={auth} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

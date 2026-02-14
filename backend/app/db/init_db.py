@@ -23,6 +23,8 @@ async def init_db() -> None:
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS account_type VARCHAR(30) DEFAULT 'business' NOT NULL",
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address VARCHAR(255)",
+            "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS city VARCHAR(100)",
+            "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS state VARCHAR(50)",
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
             "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS region_id INTEGER",
