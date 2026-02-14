@@ -68,6 +68,10 @@ export function fetchBusinessByEmail(email) {
   return request(`/businesses?${query.toString()}`);
 }
 
+export function fetchBusinessById(businessId) {
+  return request(`/businesses/${businessId}`);
+}
+
 export function fetchRecommendation(groupId, constraints) {
   return request('/recommend', {
     method: 'POST',
