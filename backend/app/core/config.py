@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_jwt_audience: str = "authenticated"
+    baseline_delivery_miles: float = 5.0
+    consolidated_delivery_miles: float = 8.0
+    city_projection_businesses: int = 1000
+    db_init_on_startup: bool = True
+    db_init_strict: bool = False
+    db_connect_timeout_seconds: int = 10
+    db_ssl_verify: bool = True
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -21,7 +21,19 @@
 
 Health endpoint:
 - `GET /api/v1/health`
+- `GET /api/v1/health/db`
 
 Authenticated endpoint:
 - `GET /api/v1/auth/me`
 - Requires `Authorization: Bearer <supabase_access_token>`
+
+Core MVP endpoints:
+- `POST /api/v1/businesses`
+- `GET /api/v1/businesses/{id}`
+- `GET /api/v1/products`
+- `GET /api/v1/groups`
+- `POST /api/v1/groups`
+- `POST /api/v1/groups/{id}/join`
+- `GET /api/v1/groups/{id}`
+- `GET /api/v1/groups/{id}/impact`
+- `POST /api/v1/recommend`
