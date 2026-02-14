@@ -15,6 +15,7 @@ from app.db.models.product import Product
 from app.db.models.supplier_confirmed_order import SupplierConfirmedOrder
 from app.db.models.supplier_product import SupplierProduct
 from app.service.email_service import send_group_confirmed_email
+from app.service.supplier_service import get_reserved_units_by_supplier_product
 from app.service.utils import safe_divide, to_float
 
 settings = get_settings()
@@ -76,6 +77,7 @@ async def create_group(
 
     supplier = None
     supplier_product = None
+    effective_available_units = None
     if supplier_business_id:
         supplier = await session.get(Business, supplier_business_id)
         if not supplier:
@@ -92,12 +94,25 @@ async def create_group(
             raise ValueError("Supplier product does not belong to supplier_business_id")
         if supplier_product.status != "active":
             raise ValueError("Supplier product is not active")
-        if supplier_product.available_units <= 0:
+        reserved_by_product = await get_reserved_units_by_supplier_product(session, [supplier_product.id])
+        effective_available_units = max(
+            0,
+            int(supplier_product.available_units) - int(reserved_by_product.get(supplier_product.id, 0)),
+        )
+        if effective_available_units <= 0:
             raise ValueError("Supplier product is out of stock")
-        if target_units and target_units > supplier_product.available_units:
+        if target_units and target_units > effective_available_units:
             raise ValueError("target_units exceeds supplier available units")
         if not supplier:
             supplier = await session.get(Business, supplier_product.supplier_business_id)
+
+    final_target_units = target_units or product.min_bulk_units
+    if supplier_product:
+        if effective_available_units is None:
+            effective_available_units = int(supplier_product.available_units)
+        final_target_units = min(int(final_target_units), effective_available_units)
+        if final_target_units <= 0:
+            raise ValueError("Supplier product is out of stock")
 
     group = BuyingGroup(
         id=str(uuid4()),
@@ -106,7 +121,7 @@ async def create_group(
         supplier_business_id=supplier.id if supplier else None,
         supplier_product_id=supplier_product.id if supplier_product else None,
         region_id=business.region_id,
-        target_units=target_units or product.min_bulk_units,
+        target_units=final_target_units,
         min_businesses_required=max(1, min_businesses_required or settings.group_default_min_businesses_required),
         deadline=deadline or (datetime.utcnow() + timedelta(hours=72)),
         status="active",
@@ -146,7 +161,16 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
         supplier_product = await session.get(SupplierProduct, group.supplier_product_id)
         if not supplier_product:
             raise ValueError("Supplier product not found")
-        max_units_allowed = min(max_units_allowed, int(supplier_product.available_units))
+        reserved_by_product = await get_reserved_units_by_supplier_product(
+            session,
+            [group.supplier_product_id],
+            exclude_group_id=group.id,
+        )
+        available_for_group = max(
+            0,
+            int(supplier_product.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
+        )
+        max_units_allowed = min(max_units_allowed, available_for_group)
 
     if current_units + units > max_units_allowed:
         remaining = max(0, max_units_allowed - current_units)
@@ -268,7 +292,16 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
         supplier_available_units = None
         if group.supplier_product_id:
             sp = await session.get(SupplierProduct, group.supplier_product_id)
-            supplier_available_units = int(sp.available_units) if sp is not None else None
+            if sp is not None:
+                reserved_by_product = await get_reserved_units_by_supplier_product(
+                    session,
+                    [group.supplier_product_id],
+                    exclude_group_id=group.id,
+                )
+                supplier_available_units = max(
+                    0,
+                    int(sp.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
+                )
 
         max_capacity = int(group.target_units)
         if supplier_available_units is not None:
@@ -325,7 +358,16 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
     supplier_available_units = None
     if group.supplier_product_id:
         sp = await session.get(SupplierProduct, group.supplier_product_id)
-        supplier_available_units = int(sp.available_units) if sp is not None else None
+        if sp is not None:
+            reserved_by_product = await get_reserved_units_by_supplier_product(
+                session,
+                [group.supplier_product_id],
+                exclude_group_id=group.id,
+            )
+            supplier_available_units = max(
+                0,
+                int(sp.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
+            )
     max_capacity = int(group.target_units)
     if supplier_available_units is not None:
         max_capacity = min(max_capacity, supplier_available_units)

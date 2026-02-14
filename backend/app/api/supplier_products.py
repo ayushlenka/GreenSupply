@@ -3,7 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
 from app.schemas.domain import SupplierProductCreate, SupplierProductRead
-from app.service.supplier_service import create_supplier_product, list_supplier_products
+from app.service.supplier_service import (
+    create_supplier_product,
+    get_reserved_units_by_supplier_product,
+    list_supplier_products,
+)
 from app.service.utils import to_float
 
 router = APIRouter(prefix="/supplier-products")
@@ -49,6 +53,7 @@ async def list_supplier_products_endpoint(
     supplier_business_id: str | None = Query(default=None),
 ) -> list[SupplierProductRead]:
     items = await list_supplier_products(db, supplier_business_id=supplier_business_id)
+    reserved_by_product = await get_reserved_units_by_supplier_product(db, [item.id for item in items])
     return [
         SupplierProductRead(
             id=item.id,
@@ -56,7 +61,7 @@ async def list_supplier_products_endpoint(
             name=item.name,
             category=item.category,
             material=item.material,
-            available_units=item.available_units,
+            available_units=max(0, int(item.available_units) - int(reserved_by_product.get(item.id, 0))),
             unit_price=to_float(item.unit_price),
             min_order_units=item.min_order_units,
             status=item.status,

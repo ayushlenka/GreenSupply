@@ -2,10 +2,12 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.business import Business
+from app.db.models.buying_group import BuyingGroup
+from app.db.models.group_commitment import GroupCommitment
 from app.db.models.supplier_product import SupplierProduct
 
 
@@ -57,3 +59,31 @@ async def list_supplier_products(session: AsyncSession, supplier_business_id: st
         stmt = stmt.where(SupplierProduct.supplier_business_id == supplier_business_id)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_reserved_units_by_supplier_product(
+    session: AsyncSession,
+    supplier_product_ids: list[str],
+    *,
+    exclude_group_id: str | None = None,
+) -> dict[str, int]:
+    if not supplier_product_ids:
+        return {}
+
+    stmt = (
+        select(
+            BuyingGroup.supplier_product_id,
+            func.coalesce(func.sum(GroupCommitment.units), 0).label("reserved_units"),
+        )
+        .join(GroupCommitment, GroupCommitment.group_id == BuyingGroup.id)
+        .where(
+            BuyingGroup.status == "active",
+            BuyingGroup.supplier_product_id.in_(supplier_product_ids),
+        )
+        .group_by(BuyingGroup.supplier_product_id)
+    )
+    if exclude_group_id:
+        stmt = stmt.where(BuyingGroup.id != exclude_group_id)
+
+    result = await session.execute(stmt)
+    return {str(supplier_product_id): int(reserved_units or 0) for supplier_product_id, reserved_units in result.all()}
