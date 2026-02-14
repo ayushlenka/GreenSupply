@@ -1,0 +1,23 @@
+# GreenSupply Backend
+
+## Structure
+
+- `app/`: FastAPI app entrypoint (`main.py`)
+- `api/`: API route files
+- `service/`: Business logic used by API routes
+- `db/`: Database base models and async session setup
+- `core/`: Settings and shared app config
+
+## Quick start
+
+1. Create and activate a virtual environment
+   - PowerShell: `python -m venv .venv` then `.\.venv\Scripts\Activate.ps1`
+2. Install dependencies
+   - `pip install -r requirements.txt`
+3. Copy env file and update values
+   - `Copy-Item .env.example .env`
+4. Run the API
+   - `uvicorn app.main:app --reload`
+
+Health endpoint:
+- `GET /api/v1/health`
