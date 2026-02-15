@@ -97,6 +97,13 @@ export function fetchDashboardRecommendation(payload = {}) {
   });
 }
 
+export function fetchGroupOpportunities(payload) {
+  return request('/recommend/group-opportunities', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createSupplierProduct(payload) {
   return request('/supplier-products', {
     method: 'POST',

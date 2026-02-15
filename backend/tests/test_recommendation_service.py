@@ -1,7 +1,12 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.service.recommendation_service import build_dashboard_recommendation, build_group_recommendation
+from app.service.recommendation_service import (
+    build_dashboard_recommendation,
+    build_group_opportunities_recommendation,
+    build_group_recommendation,
+)
 
 
 class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
@@ -117,3 +122,81 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["source"], "gemini")
         self.assertEqual(result["key_insight"], "Insight")
+
+    async def test_group_opportunities_fallback(self):
+        business = SimpleNamespace(id="b1", account_type="business", region_id=2, name="Mission Cafe")
+        supplier_product = SimpleNamespace(
+            id="sp1",
+            supplier_business_id="s1",
+            name="Takeout Paper Bag",
+            category="bag",
+            material="kraft paper",
+            available_units=2000,
+            unit_price=0.12,
+        )
+        region_groups = [
+            {"product": {"category": "bag"}, "current_units": 900, "supplier_product_id": None},
+        ]
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=business)
+        session.execute = AsyncMock()
+        session.execute.return_value = SimpleNamespace(all=lambda: [("s1", "Supplier One")])
+
+        with patch("app.service.recommendation_service.list_supplier_products", new=AsyncMock(return_value=[supplier_product])), \
+             patch("app.service.recommendation_service.get_reserved_units_by_supplier_product", new=AsyncMock(return_value={"sp1": 100})), \
+             patch("app.service.recommendation_service.list_active_groups", new=AsyncMock(return_value=region_groups)), \
+             patch("app.service.recommendation_service._call_gemini_object", new=AsyncMock(return_value=None)):
+            result = await build_group_opportunities_recommendation(session, business_id="b1", max_results=3)
+
+        self.assertEqual(result["source"], "fallback")
+        self.assertEqual(result["region_id"], 2)
+        self.assertGreaterEqual(len(result["opportunities"]), 1)
+        self.assertEqual(result["opportunities"][0]["supplier_product_id"], "sp1")
+
+    async def test_group_opportunities_gemini(self):
+        business = SimpleNamespace(id="b1", account_type="business", region_id=2, name="Mission Cafe")
+        supplier_product = SimpleNamespace(
+            id="sp1",
+            supplier_business_id="s1",
+            name="Takeout Paper Bag",
+            category="bag",
+            material="kraft paper",
+            available_units=2000,
+            unit_price=0.12,
+        )
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=business)
+        session.execute = AsyncMock()
+        session.execute.return_value = SimpleNamespace(all=lambda: [("s1", "Supplier One")])
+
+        gemini_payload = {
+            "opportunities": [
+                {
+                    "supplier_business_id": "s1",
+                    "supplier_business_name": "Supplier One",
+                    "supplier_product_id": "sp1",
+                    "product_name": "Takeout Paper Bag",
+                    "category": "bag",
+                    "material": "kraft paper",
+                    "recommended_target_units": 1500,
+                    "recommended_min_businesses_required": 3,
+                    "recommended_deadline_days": 7,
+                    "recommended_initial_commitment_units": 500,
+                    "outreach_copy": "Copy",
+                    "reasoning": "Reason",
+                    "evidence_used": "Evidence",
+                    "risk_note": "Risk",
+                }
+            ]
+        }
+
+        with patch("app.service.recommendation_service.list_supplier_products", new=AsyncMock(return_value=[supplier_product])), \
+             patch("app.service.recommendation_service.get_reserved_units_by_supplier_product", new=AsyncMock(return_value={"sp1": 100})), \
+             patch("app.service.recommendation_service.list_active_groups", new=AsyncMock(return_value=[])), \
+             patch("app.service.recommendation_service._call_gemini_object", new=AsyncMock(return_value=gemini_payload)):
+            result = await build_group_opportunities_recommendation(session, business_id="b1", max_results=3)
+
+        self.assertEqual(result["source"], "gemini")
+        self.assertEqual(result["opportunities"][0]["supplier_product_id"], "sp1")

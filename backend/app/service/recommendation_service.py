@@ -6,10 +6,13 @@ import logging
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.db.models.business import Business
 from app.service.group_service import get_group_details, get_group_impact, list_active_groups
+from app.service.supplier_service import get_reserved_units_by_supplier_product, list_supplier_products
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +158,13 @@ def _build_dashboard_prompt(
 
 
 async def _call_gemini(prompt: str) -> dict[str, str] | None:
+    raw = await _call_gemini_object(prompt)
+    if not raw:
+        return None
+    return _normalize_output_keys(raw)
+
+
+async def _call_gemini_object(prompt: str) -> dict[str, object] | None:
     settings = get_settings()
     if not settings.gemini_api_key:
         return None
@@ -167,10 +177,14 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
         },
     }
 
-    models_to_try = [settings.gemini_model, "gemini-1.5-flash"]
+    models_to_try = [
+        settings.gemini_model,
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+    ]
     seen_models: set[str] = set()
 
-    def _request_with_model(model: str) -> dict[str, str] | None:
+    def _request_with_model(model: str) -> dict[str, object] | None:
         endpoint = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             f"?key={settings.gemini_api_key}"
@@ -196,7 +210,7 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
         if not parsed:
             logger.warning("Gemini output was not parseable JSON")
             return None
-        return _normalize_output_keys(parsed)
+        return parsed
 
     for model in models_to_try:
         if not model or model in seen_models:
@@ -218,6 +232,126 @@ async def _call_gemini(prompt: str) -> dict[str, str] | None:
             logger.warning("Gemini request failed model=%s error=%s", model, exc)
             continue
     return None
+
+
+def _format_opportunity_fallback(
+    *,
+    supplier_business_id: str,
+    supplier_business_name: str | None,
+    supplier_product_id: str,
+    product_name: str,
+    category: str,
+    material: str,
+    unit_price: float,
+    available_units: int,
+    category_demand_units: int,
+    max_results_index: int,
+) -> dict[str, object]:
+    demand_seed = category_demand_units if category_demand_units > 0 else int(available_units * 0.45)
+    target_units = max(1, min(available_units, max(int(demand_seed * 1.1), 500)))
+    min_businesses = max(2, min(6, round(target_units / 1500)))
+    deadline_days = 5 if category_demand_units >= 1500 else 7
+    initial_commitment = max(1, min(target_units, max(int(target_units / max(min_businesses, 1)), 100)))
+
+    return {
+        "supplier_business_id": supplier_business_id,
+        "supplier_business_name": supplier_business_name,
+        "supplier_product_id": supplier_product_id,
+        "product_name": product_name,
+        "category": category,
+        "material": material,
+        "recommended_target_units": int(target_units),
+        "recommended_min_businesses_required": int(min_businesses),
+        "recommended_deadline_days": int(deadline_days),
+        "recommended_initial_commitment_units": int(initial_commitment),
+        "outreach_copy": (
+            f"Launching a neighborhood order for {product_name}. "
+            f"We can unlock approx ${unit_price:.2f}/unit bulk pricing if {min_businesses} businesses join in {deadline_days} days."
+        ),
+        "reasoning": (
+            "Recommendation balances current supplier availability with observed category demand in active local groups."
+        ),
+        "evidence_used": (
+            f"Available inventory: {available_units} units. "
+            f"Regional demand signal for {category}: {category_demand_units} committed units."
+        ),
+        "risk_note": (
+            "If participation is slow in the first 48 hours, increase outreach urgency or lower target units."
+        ),
+        "_rank_score": category_demand_units + int(available_units * 0.2) - (max_results_index * 5),
+    }
+
+
+def _build_group_opportunities_prompt(
+    *,
+    business_name: str | None,
+    region_id: int | None,
+    constraints: str | None,
+    candidates: list[dict[str, object]],
+    max_results: int,
+) -> str:
+    return (
+        "You are an operations copilot for a cooperative procurement platform.\n"
+        "Return valid JSON with key opportunities (array).\n"
+        "Each opportunity object must include exactly these keys:\n"
+        "supplier_business_id, supplier_business_name, supplier_product_id, product_name, category, material,\n"
+        "recommended_target_units, recommended_min_businesses_required, recommended_deadline_days,\n"
+        "recommended_initial_commitment_units, outreach_copy, reasoning, evidence_used, risk_note.\n"
+        "Use only supplier_product_ids that exist in provided candidates.\n"
+        "Do not invent supplier IDs or products.\n"
+        f"Return at most {max_results} opportunities.\n\n"
+        f"Business name: {business_name or 'Unknown business'}\n"
+        f"Region id: {region_id}\n"
+        f"Constraints: {constraints or 'None provided'}\n"
+        f"Candidates JSON: {json.dumps(candidates)}\n"
+    )
+
+
+def _sanitize_ai_group_opportunities(
+    ai_payload: dict[str, object],
+    *,
+    allowed_supplier_product_ids: set[str],
+    max_results: int,
+) -> list[dict[str, object]]:
+    opportunities_raw = ai_payload.get("opportunities")
+    if not isinstance(opportunities_raw, list):
+        return []
+
+    cleaned: list[dict[str, object]] = []
+    for entry in opportunities_raw:
+        if not isinstance(entry, dict):
+            continue
+        supplier_product_id = str(entry.get("supplier_product_id", "")).strip()
+        if not supplier_product_id or supplier_product_id not in allowed_supplier_product_ids:
+            continue
+        try:
+            cleaned.append(
+                {
+                    "supplier_business_id": str(entry.get("supplier_business_id", "")).strip(),
+                    "supplier_business_name": (
+                        str(entry.get("supplier_business_name")).strip()
+                        if entry.get("supplier_business_name") is not None
+                        else None
+                    ),
+                    "supplier_product_id": supplier_product_id,
+                    "product_name": str(entry.get("product_name", "")).strip(),
+                    "category": str(entry.get("category", "")).strip(),
+                    "material": str(entry.get("material", "")).strip(),
+                    "recommended_target_units": max(1, int(entry.get("recommended_target_units", 1))),
+                    "recommended_min_businesses_required": max(1, int(entry.get("recommended_min_businesses_required", 1))),
+                    "recommended_deadline_days": max(1, int(entry.get("recommended_deadline_days", 1))),
+                    "recommended_initial_commitment_units": max(1, int(entry.get("recommended_initial_commitment_units", 1))),
+                    "outreach_copy": str(entry.get("outreach_copy", "")).strip(),
+                    "reasoning": str(entry.get("reasoning", "")).strip(),
+                    "evidence_used": str(entry.get("evidence_used", "")).strip(),
+                    "risk_note": str(entry.get("risk_note", "")).strip(),
+                }
+            )
+        except (ValueError, TypeError):
+            continue
+        if len(cleaned) >= max_results:
+            break
+    return cleaned
 
 
 async def build_group_recommendation(
@@ -316,3 +450,113 @@ async def build_dashboard_recommendation(
         business_name=business_name,
     )
     return {"source": "fallback", **fallback}
+
+
+async def build_group_opportunities_recommendation(
+    session: AsyncSession,
+    *,
+    business_id: str,
+    max_results: int = 3,
+    constraints: str | None = None,
+) -> dict[str, object]:
+    if max_results <= 0:
+        raise ValueError("max_results must be greater than 0")
+
+    business = await session.get(Business, business_id)
+    if not business:
+        raise ValueError("Business not found")
+    if business.account_type != "business":
+        raise ValueError("Only business accounts can request group opportunities")
+    if business.region_id is None:
+        raise ValueError("Business must be assigned to a region")
+
+    supplier_products = await list_supplier_products(session)
+    if not supplier_products:
+        return {"source": "fallback", "region_id": business.region_id, "opportunities": []}
+
+    reserved_by_product = await get_reserved_units_by_supplier_product(session, [sp.id for sp in supplier_products])
+    groups_in_region = await list_active_groups(session, region_id=business.region_id)
+    active_supplier_product_ids = {
+        str(g.get("supplier_product_id"))
+        for g in groups_in_region
+        if g.get("supplier_product_id")
+    }
+
+    category_demand_units: dict[str, int] = {}
+    for g in groups_in_region:
+        category = str((g.get("product") or {}).get("category") or "").strip().lower()
+        if not category:
+            continue
+        category_demand_units[category] = category_demand_units.get(category, 0) + int(g.get("current_units", 0) or 0)
+
+    supplier_ids = sorted({sp.supplier_business_id for sp in supplier_products if sp.supplier_business_id})
+    supplier_names_by_id: dict[str, str | None] = {}
+    if supplier_ids:
+        supplier_names_result = await session.execute(
+            select(Business.id, Business.name).where(Business.id.in_(supplier_ids))
+        )
+        supplier_names_by_id = {str(sid): name for sid, name in supplier_names_result.all()}
+
+    fallback_candidates: list[dict[str, object]] = []
+    for idx, sp in enumerate(supplier_products):
+        available = max(0, int(sp.available_units) - int(reserved_by_product.get(sp.id, 0)))
+        if available <= 0:
+            continue
+        if sp.id in active_supplier_product_ids:
+            continue
+        category = str(sp.category or "").strip().lower()
+        demand_units = int(category_demand_units.get(category, 0))
+        fallback_candidates.append(
+            _format_opportunity_fallback(
+                supplier_business_id=sp.supplier_business_id,
+                supplier_business_name=supplier_names_by_id.get(sp.supplier_business_id),
+                supplier_product_id=sp.id,
+                product_name=sp.name,
+                category=sp.category,
+                material=sp.material,
+                unit_price=float(sp.unit_price),
+                available_units=available,
+                category_demand_units=demand_units,
+                max_results_index=idx,
+            )
+        )
+
+    if not fallback_candidates:
+        return {"source": "fallback", "region_id": business.region_id, "opportunities": []}
+
+    fallback_candidates.sort(key=lambda c: int(c.get("_rank_score", 0)), reverse=True)
+    fallback_trimmed = fallback_candidates[: max_results]
+    fallback_for_prompt = [
+        {k: v for k, v in candidate.items() if k != "_rank_score"}
+        for candidate in fallback_trimmed
+    ]
+    allowed_ids = {str(c["supplier_product_id"]) for c in fallback_for_prompt}
+
+    prompt = _build_group_opportunities_prompt(
+        business_name=business.name,
+        region_id=business.region_id,
+        constraints=constraints,
+        candidates=fallback_for_prompt,
+        max_results=max_results,
+    )
+    gemini_raw = await _call_gemini_object(prompt)
+    if gemini_raw:
+        ai_opportunities = _sanitize_ai_group_opportunities(
+            gemini_raw,
+            allowed_supplier_product_ids=allowed_ids,
+            max_results=max_results,
+        )
+        if ai_opportunities:
+            return {
+                "source": "gemini",
+                "region_id": business.region_id,
+                "opportunities": ai_opportunities,
+            }
+
+    for candidate in fallback_trimmed:
+        candidate.pop("_rank_score", None)
+    return {
+        "source": "fallback",
+        "region_id": business.region_id,
+        "opportunities": fallback_trimmed,
+    }

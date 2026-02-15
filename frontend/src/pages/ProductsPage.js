@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { createGroup, fetchBusinessOrders, fetchProducts, fetchSupplierProducts, joinGroup } from '../api';
+import {
+  createGroup,
+  fetchBusinessOrders,
+  fetchGroupOpportunities,
+  fetchProducts,
+  fetchSupplierProducts,
+  joinGroup,
+} from '../api';
 import Navbar from '../components/Navbar';
 
 export default function ProductsPage({ auth }) {
@@ -14,6 +21,11 @@ export default function ProductsPage({ auth }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [aiIdeas, setAiIdeas] = useState([]);
+  const [aiSource, setAiSource] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [appliedAiIdea, setAppliedAiIdea] = useState(null);
   const [form, setForm] = useState({
     supplier_business_id: '',
     supplier_product_id: '',
@@ -105,6 +117,49 @@ export default function ProductsPage({ auth }) {
     [businessOrders]
   );
 
+  const onGenerateAiIdeas = async () => {
+    const businessId = auth?.profile?.id;
+    if (!businessId) {
+      setAiError('Create/load your business profile before generating recommendations.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const response = await fetchGroupOpportunities({
+        business_id: businessId,
+        max_results: 3,
+      });
+      setAiIdeas(response.opportunities || []);
+      setAiSource(response.source || '');
+      if (!response.opportunities || response.opportunities.length === 0) {
+        setAiError('No launch opportunities right now. Try again after more supplier inventory is added.');
+      }
+    } catch (err) {
+      setAiError(String(err?.message || 'Failed to generate AI opportunities.'));
+      setAiIdeas([]);
+      setAiSource('');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const onApplyAiIdea = (idea) => {
+    const supplierBusinessId = idea?.supplier_business_id || '';
+    const supplierProductId = idea?.supplier_product_id || '';
+    setForm((prev) => ({
+      ...prev,
+      supplier_business_id: supplierBusinessId,
+      supplier_product_id: supplierProductId,
+      min_businesses_required: String(idea?.recommended_min_businesses_required || prev.min_businesses_required),
+      initial_commitment_units: String(idea?.recommended_initial_commitment_units || prev.initial_commitment_units),
+    }));
+    setAppliedAiIdea(idea);
+    setMessage('AI opportunity applied to form. Review and submit when ready.');
+    setError('');
+  };
+
   const onChange = (key) => (event) => {
     const value = event.target.value;
     setError('');
@@ -179,13 +234,24 @@ export default function ProductsPage({ auth }) {
     setSubmitting(true);
     setError('');
     try {
+      const aiPlanMatches = appliedAiIdea && appliedAiIdea.supplier_product_id === form.supplier_product_id;
+      const recommendedTargetUnits = Number(appliedAiIdea?.recommended_target_units);
+      const recommendedDeadlineDays = Number(appliedAiIdea?.recommended_deadline_days);
+      const targetUnits = aiPlanMatches && Number.isFinite(recommendedTargetUnits)
+        ? Math.min(Number(selectedSupplierProduct.available_units), Math.max(1, recommendedTargetUnits))
+        : Number(selectedSupplierProduct.available_units);
+      const deadline = aiPlanMatches && Number.isFinite(recommendedDeadlineDays) && recommendedDeadlineDays > 0
+        ? new Date(Date.now() + (recommendedDeadlineDays * 24 * 60 * 60 * 1000)).toISOString()
+        : null;
+
       const group = await createGroup({
         product_id: resolvedCatalogProduct.id,
         created_by_business_id: businessId,
         supplier_business_id: form.supplier_business_id,
         supplier_product_id: form.supplier_product_id,
-        target_units: Number(selectedSupplierProduct.available_units),
+        target_units: targetUnits,
         min_businesses_required: minBusinessesRequired,
+        ...(deadline ? { deadline } : {}),
       });
 
       await joinGroup(group.id, businessId, initialCommitmentUnits);
@@ -215,6 +281,57 @@ export default function ProductsPage({ auth }) {
         <p className="mt-2 text-sm text-ink/65">
           Choose a supplier and product. Group capacity is set to the supplier's full available inventory.
         </p>
+
+        <section className="mt-6 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">AI Group Launch Assistant</h2>
+              <p className="text-sm text-ink/65">Generate high-probability group opportunities from local demand and supplier inventory.</p>
+            </div>
+            <button
+              onClick={onGenerateAiIdeas}
+              disabled={aiLoading}
+              className="rounded bg-moss px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-sage disabled:opacity-60"
+            >
+              {aiLoading ? 'Generating...' : 'Generate Opportunities'}
+            </button>
+          </div>
+
+          {aiError ? <p className="mt-4 text-sm text-red-600">{aiError}</p> : null}
+
+          {aiIdeas.length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {aiIdeas.map((idea) => (
+                <article key={idea.supplier_product_id} className="rounded border border-black/10 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-base font-semibold">{idea.product_name}</p>
+                      <p className="text-xs text-ink/65">
+                        {idea.supplier_business_name || `Supplier ${String(idea.supplier_business_id || '').slice(0, 8)}`} | {idea.category} | {idea.material}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => onApplyAiIdea(idea)}
+                      className="rounded bg-black px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-ink"
+                    >
+                      Apply to Form
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink/70">
+                    <span>Target: {idea.recommended_target_units} units</span>
+                    <span>Min businesses: {idea.recommended_min_businesses_required}</span>
+                    <span>Deadline: {idea.recommended_deadline_days} days</span>
+                  </div>
+                  <p className="mt-2 text-sm text-ink/80"><strong>Outreach:</strong> {idea.outreach_copy}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Why:</strong> {idea.reasoning}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Evidence:</strong> {idea.evidence_used}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Risk:</strong> {idea.risk_note}</p>
+                </article>
+              ))}
+              <p className="text-xs uppercase tracking-[0.08em] text-ink/55">Source: {aiSource || 'unknown'}</p>
+            </div>
+          ) : null}
+        </section>
 
         {loading ? (
           <div className="mt-12 text-sm text-ink/60">Loading order data...</div>
