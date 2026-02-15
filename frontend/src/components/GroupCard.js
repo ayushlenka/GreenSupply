@@ -1,4 +1,6 @@
-export default function GroupCard({ group, isActive, onSelect, onJoin, style, currentBusinessId }) {
+import { memo } from 'react';
+
+export default memo(function GroupCard({ group, isActive, onSelect, onJoin, style, currentBusinessId }) {
   const product = group.product || {};
   const pct = Math.round(group.progress_pct || 0);
   const fillClass = pct < 40 ? 'bg-amber-500' : pct < 75 ? 'bg-sage' : 'bg-moss';
@@ -93,4 +95,4 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style, cu
       </button>
     </article>
   );
-}
+})

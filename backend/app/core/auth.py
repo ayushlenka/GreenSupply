@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -11,6 +12,9 @@ from pydantic import BaseModel
 from app.core.config import Settings, get_settings
 
 security = HTTPBearer()
+
+_TOKEN_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
+_TOKEN_CACHE_TTL = 300  # 5 minutes
 
 
 class AuthenticatedUser(BaseModel):
@@ -29,6 +33,13 @@ def _unauthorized(detail: str = "Invalid or expired token") -> HTTPException:
 
 
 async def _fetch_supabase_user(token: str, settings: Settings) -> dict[str, Any]:
+    cached = _TOKEN_CACHE.get(token)
+    if cached is not None:
+        data, ts = cached
+        if time.monotonic() - ts < _TOKEN_CACHE_TTL:
+            return data
+        del _TOKEN_CACHE[token]
+
     if not settings.supabase_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -55,7 +66,9 @@ async def _fetch_supabase_user(token: str, settings: Settings) -> dict[str, Any]
             return json.loads(response.read().decode("utf-8"))
 
     try:
-        return await asyncio.to_thread(_fetch)
+        result = await asyncio.to_thread(_fetch)
+        _TOKEN_CACHE[token] = (result, time.monotonic())
+        return result
     except HTTPError as exc:
         if exc.code in (401, 403):
             raise _unauthorized() from exc

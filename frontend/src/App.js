@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { fetchBusinessByEmail, fetchMe } from './api';
 import { clearStoredToken, getStoredToken, readTokenFromUrlHash, setStoredToken } from './auth';
 import ProtectedRoute from './components/ProtectedRoute';
-import DashboardPage from './pages/DashboardPage';
-import AuthPage from './pages/AuthPage';
-import GroupsPage from './pages/GroupsPage';
-import HomePage from './pages/HomePage';
-import ProductsPage from './pages/ProductsPage';
-import SupplierPage from './pages/SupplierPage';
+
+const HomePage = lazy(() => import('./pages/HomePage'));
+const AuthPage = lazy(() => import('./pages/AuthPage'));
+const GroupsPage = lazy(() => import('./pages/GroupsPage'));
+const ProductsPage = lazy(() => import('./pages/ProductsPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const SupplierPage = lazy(() => import('./pages/SupplierPage'));
 
 function getInitialToken() {
   const storedToken = getStoredToken();
@@ -43,19 +44,17 @@ function App() {
       try {
         const me = await fetchMe();
         if (cancelled) return;
-
         setUser(me);
 
-        if (!me?.email) {
+        if (me?.email) {
+          try {
+            const business = await fetchBusinessByEmail(me.email);
+            if (!cancelled) setProfile(business);
+          } catch {
+            if (!cancelled) setProfile(null);
+          }
+        } else {
           setProfile(null);
-          return;
-        }
-
-        try {
-          const business = await fetchBusinessByEmail(me.email);
-          if (!cancelled) setProfile(business);
-        } catch {
-          if (!cancelled) setProfile(null);
         }
       } catch {
         if (cancelled) return;
@@ -107,6 +106,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<div className="flex h-screen items-center justify-center bg-cream text-ink/60 text-sm">Loading...</div>}>
       <Routes>
         <Route path="/" element={<HomePage auth={auth} />} />
         <Route path="/auth" element={<AuthPage auth={auth} />} />
@@ -146,6 +146,7 @@ function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

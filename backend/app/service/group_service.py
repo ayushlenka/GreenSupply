@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -411,23 +412,54 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
     groups = [row[0] for row in rows]
     products_by_group = {row[0].id: row[1] for row in rows}
     regions_by_group = {row[0].id: row[2] for row in rows}
-    rollups = await _fetch_group_rollups(session, [group.id for group in groups])
+
+    group_ids = [g.id for g in groups]
+    sp_ids = sorted({g.supplier_product_id for g in groups if g.supplier_product_id})
+
+    if sp_ids:
+        rollups, reserved_by_product = await asyncio.gather(
+            _fetch_group_rollups(session, group_ids),
+            get_reserved_units_by_supplier_product(session, sp_ids),
+        )
+    else:
+        rollups = await _fetch_group_rollups(session, group_ids)
+        reserved_by_product = {}
+
+    sp_objects: dict[str, SupplierProduct] = {}
+    if sp_ids:
+        sp_result = await session.execute(select(SupplierProduct).where(SupplierProduct.id.in_(sp_ids)))
+        sp_objects = {sp.id: sp for sp in sp_result.scalars().all()}
 
     payload: list[dict[str, object]] = []
     has_status_updates = False
     for group in groups:
         product = products_by_group[group.id]
         rollup = rollups.get(group.id, {"current_units": 0, "business_count": 0})
-        metrics = _build_group_metrics(product, rollup["current_units"], rollup["business_count"], group.target_units)
-        max_capacity, supplier_available_units, status_changed = await _sync_group_capacity_status(
-            session,
-            group,
-            current_units=int(rollup["current_units"]),
-            business_count=int(rollup["business_count"]),
-        )
-        if status_changed:
+        current_units = int(rollup["current_units"])
+        business_count = int(rollup["business_count"])
+        metrics = _build_group_metrics(product, current_units, business_count, group.target_units)
+
+        max_capacity = int(group.target_units)
+        supplier_available_units: int | None = None
+        if group.supplier_product_id:
+            sp = sp_objects.get(group.supplier_product_id)
+            if sp:
+                reserved = int(reserved_by_product.get(group.supplier_product_id, 0))
+                supplier_available_units = max(0, int(sp.available_units) - reserved)
+                max_capacity = min(max_capacity, supplier_available_units)
+
+        changed = False
+        if group.status != "confirmed":
+            if current_units >= max_capacity and business_count < int(group.min_businesses_required):
+                if group.status != "capacity_reached":
+                    group.status = "capacity_reached"
+                    changed = True
+            elif group.status == "capacity_reached" and current_units < max_capacity:
+                group.status = "active"
+                changed = True
+        if changed:
             has_status_updates = True
-        remaining_units = max(0, max_capacity - int(rollup["current_units"]))
+        remaining_units = max(0, max_capacity - current_units)
         region = regions_by_group.get(group.id)
         center_lat = round((region.min_lat + region.max_lat) / 2, 6) if region else None
         center_lng = round((region.min_lng + region.max_lng) / 2, 6) if region else None

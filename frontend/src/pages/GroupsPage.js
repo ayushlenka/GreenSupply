@@ -97,7 +97,7 @@ export default function GroupsPage({ auth }) {
   }, [regionId]);
 
   const activeGroup = groups.find((group) => group.id === activeId) || null;
-  const commitments = activeGroupDetail?.commitments || [];
+  const commitments = useMemo(() => activeGroupDetail?.commitments || [], [activeGroupDetail]);
   const confirmedOrder = activeGroupDetail?.confirmed_order || null;
 
   const routeProgress = useMemo(() => {
@@ -191,20 +191,17 @@ export default function GroupsPage({ auth }) {
     }
 
     let cancelled = false;
-    fetchGroupDetail(activeId)
-      .then(async (detail) => {
+    const group = groups.find((g) => g.id === activeId);
+    const supplierId = group?.supplier_business_id;
+
+    const detailPromise = fetchGroupDetail(activeId);
+    const supplierPromise = supplierId ? fetchBusinessById(supplierId).catch(() => null) : Promise.resolve(null);
+
+    Promise.all([detailPromise, supplierPromise])
+      .then(([detail, supplier]) => {
         if (cancelled) return;
         setActiveGroupDetail(detail);
-        if (detail?.supplier_business_id) {
-          try {
-            const supplier = await fetchBusinessById(detail.supplier_business_id);
-            if (!cancelled) setSupplierBusiness(supplier);
-          } catch {
-            if (!cancelled) setSupplierBusiness(null);
-          }
-        } else {
-          setSupplierBusiness(null);
-        }
+        setSupplierBusiness(supplier);
       })
       .catch(() => {
         if (!cancelled) {
@@ -216,7 +213,7 @@ export default function GroupsPage({ auth }) {
     return () => {
       cancelled = true;
     };
-  }, [activeId]);
+  }, [activeId, groups]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setRouteClock(Date.now()), 30000);
