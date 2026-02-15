@@ -12,6 +12,7 @@ from app.db.models.business import Business
 from app.db.models.buying_group import BuyingGroup
 from app.db.models.group_commitment import GroupCommitment
 from app.db.models.product import Product
+from app.db.models.region import Region
 from app.db.models.supplier_confirmed_order import SupplierConfirmedOrder
 from app.db.models.supplier_product import SupplierProduct
 from app.service.delivery_route_service import compute_delivery_route, next_business_day_start_utc
@@ -391,10 +392,11 @@ async def _sync_group_capacity_status(
     return max_capacity, supplier_available_units, changed
 
 
-def _group_base_query() -> Select[tuple[BuyingGroup, Product]]:
+def _group_base_query() -> Select:
     return (
-        select(BuyingGroup, Product)
+        select(BuyingGroup, Product, Region)
         .join(Product, Product.id == BuyingGroup.product_id)
+        .outerjoin(Region, Region.id == BuyingGroup.region_id)
         .order_by(BuyingGroup.created_at.desc())
     )
 
@@ -408,6 +410,7 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
 
     groups = [row[0] for row in rows]
     products_by_group = {row[0].id: row[1] for row in rows}
+    regions_by_group = {row[0].id: row[2] for row in rows}
     rollups = await _fetch_group_rollups(session, [group.id for group in groups])
 
     payload: list[dict[str, object]] = []
@@ -425,6 +428,9 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
         if status_changed:
             has_status_updates = True
         remaining_units = max(0, max_capacity - int(rollup["current_units"]))
+        region = regions_by_group.get(group.id)
+        center_lat = round((region.min_lat + region.max_lat) / 2, 6) if region else None
+        center_lng = round((region.min_lng + region.max_lng) / 2, 6) if region else None
 
         payload.append(
             {
@@ -432,6 +438,8 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
                 "status": group.status,
                 "created_by_business_id": group.created_by_business_id,
                 "region_id": group.region_id,
+                "group_center_latitude": center_lat,
+                "group_center_longitude": center_lng,
                 "supplier_business_id": group.supplier_business_id,
                 "supplier_product_id": group.supplier_product_id,
                 "supplier_available_units": supplier_available_units,
@@ -464,7 +472,7 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
     if not row:
         return None
 
-    group, product = row
+    group, product, _region = row
     rollups = await _fetch_group_rollups(session, [group.id])
     current_units = int(rollups.get(group.id, {}).get("current_units", 0))
     business_count = int(rollups.get(group.id, {}).get("business_count", 0))

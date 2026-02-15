@@ -87,6 +87,8 @@ class GroupRead(BaseModel):
     status: str
     created_by_business_id: str | None = None
     region_id: int | None = None
+    group_center_latitude: float | None = None
+    group_center_longitude: float | None = None
     supplier_business_id: str | None = None
     supplier_product_id: str | None = None
     supplier_available_units: int | None = None

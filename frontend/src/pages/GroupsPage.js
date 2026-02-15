@@ -16,6 +16,16 @@ const ROUTE_SOURCE_ID = 'delivery-route-source';
 const ROUTE_LAYER_ID = 'delivery-route-layer';
 const ROUTE_GLOW_LAYER_ID = 'delivery-route-glow';
 
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 3958.8; // Earth radius in miles
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function twoMileBounds(centerLng, centerLat) {
   const latDelta = HALF_SIDE_MILES / MILES_PER_LAT_DEGREE;
   const lngDelta = HALF_SIDE_MILES / (MILES_PER_LAT_DEGREE * Math.cos((centerLat * Math.PI) / 180));
@@ -32,6 +42,7 @@ export default function GroupsPage({ auth }) {
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [sort, setSort] = useState('nearest');
   const [modalGroup, setModalGroup] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '' });
   const [mapReady, setMapReady] = useState(false);
@@ -246,9 +257,40 @@ export default function GroupsPage({ auth }) {
     }
   };
 
+  const userLat = auth?.profile?.latitude;
+  const userLng = auth?.profile?.longitude;
+  const hasUserLocation = Number.isFinite(userLat) && Number.isFinite(userLng);
+
   const categories = [...new Set(groups.map((g) => (g.product?.category || '').toLowerCase()))].filter(Boolean);
-  const filteredGroups =
-    filter === 'all' ? groups : groups.filter((g) => (g.product?.category || '').toLowerCase() === filter);
+
+  const sortedGroups = useMemo(() => {
+    const filtered = filter === 'all' ? [...groups] : groups.filter((g) => (g.product?.category || '').toLowerCase() === filter);
+
+    if (sort === 'nearest' && hasUserLocation) {
+      filtered.sort((a, b) => {
+        const aHas = Number.isFinite(a.group_center_latitude) && Number.isFinite(a.group_center_longitude);
+        const bHas = Number.isFinite(b.group_center_latitude) && Number.isFinite(b.group_center_longitude);
+        if (!aHas && !bHas) return 0;
+        if (!aHas) return 1;
+        if (!bHas) return -1;
+        const distA = haversineDistance(userLat, userLng, a.group_center_latitude, a.group_center_longitude);
+        const distB = haversineDistance(userLat, userLng, b.group_center_latitude, b.group_center_longitude);
+        return distA - distB;
+      });
+    } else if (sort === 'deadline') {
+      filtered.sort((a, b) => {
+        const aTime = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+        const bTime = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+        return aTime - bTime;
+      });
+    } else if (sort === 'progress') {
+      filtered.sort((a, b) => (b.progress_pct || 0) - (a.progress_pct || 0));
+    }
+
+    return filtered;
+  }, [groups, filter, sort, hasUserLocation, userLat, userLng]);
+
+  const filteredGroups = sortedGroups;
 
   const totalBusinesses = groups.reduce((s, g) => s + (g.business_count || 0), 0);
   const totalSavings = groups.reduce((s, g) => s + (g.estimated_savings_usd || 0), 0);
@@ -462,6 +504,24 @@ export default function GroupsPage({ auth }) {
                 onClick={() => setFilter(cat)}
               >
                 {cat}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-ink/40 self-center mr-1">Sort</span>
+            {[
+              { key: 'nearest', label: 'Nearest' },
+              { key: 'deadline', label: 'Deadline' },
+              { key: 'progress', label: 'Progress' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  sort === key ? 'border-ink bg-ink text-parchment' : 'border-black/20 text-ink/70'
+                }`}
+                onClick={() => setSort(key)}
+              >
+                {label}
               </button>
             ))}
           </div>
