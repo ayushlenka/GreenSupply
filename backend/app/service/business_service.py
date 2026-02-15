@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -85,7 +85,7 @@ async def create_business(
         latitude=resolved_latitude,
         longitude=resolved_longitude,
         region_id=region.id if region else None,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
     session.add(business)
     await session.commit()

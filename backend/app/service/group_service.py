@@ -125,10 +125,10 @@ async def create_group(
         region_id=business.region_id,
         target_units=final_target_units,
         min_businesses_required=max(1, min_businesses_required or settings.group_default_min_businesses_required),
-        deadline=deadline or (datetime.utcnow() + timedelta(hours=72)),
+        deadline=deadline or (datetime.now(UTC) + timedelta(hours=72)),
         status="active",
         confirmed_at=None,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
     session.add(group)
     await session.commit()
@@ -189,7 +189,7 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
         group_id=group_id,
         business_id=business_id,
         units=units,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
     session.add(commitment)
     await session.commit()
@@ -257,7 +257,7 @@ async def _maybe_confirm_group(
             raise ValueError("Supplier inventory is insufficient for confirmation")
 
     group.status = "confirmed"
-    group.confirmed_at = datetime.utcnow()
+    group.confirmed_at = datetime.now(UTC)
 
     if group.supplier_business_id:
         existing = await session.execute(select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id == group.id))
@@ -314,7 +314,7 @@ async def _maybe_confirm_group(
                     route_total_miles=route_total_miles,
                     route_total_minutes=route_total_minutes,
                     route_points=route_points,
-                    created_at=datetime.utcnow(),
+                    created_at=datetime.now(UTC),
                 )
             )
 

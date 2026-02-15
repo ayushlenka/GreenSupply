@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,7 +150,7 @@ async def seed_products(session: AsyncSession) -> None:
                 min_bulk_units=item["min_bulk_units"],
                 co2_per_unit_kg=item["co2_per_unit_kg"],
                 plastic_avoided_per_unit_kg=item["plastic_avoided_per_unit_kg"],
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
             )
         )
 

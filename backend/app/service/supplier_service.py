@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -44,8 +44,8 @@ async def create_supplier_product(
         unit_price=Decimal(str(unit_price)),
         min_order_units=min_order_units,
         status="active",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(item)
     await session.commit()
