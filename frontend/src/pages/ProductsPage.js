@@ -1,0 +1,467 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import {
+  createGroup,
+  fetchBusinessOrders,
+  fetchGroupOpportunities,
+  fetchProducts,
+  fetchSupplierProducts,
+  joinGroup,
+} from '../api';
+import Navbar from '../components/Navbar';
+
+export default function ProductsPage({ auth }) {
+  const navigate = useNavigate();
+  const [products, setProducts] = useState([]);
+  const [supplierProducts, setSupplierProducts] = useState([]);
+  const [businessOrders, setBusinessOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [aiIdeas, setAiIdeas] = useState([]);
+  const [aiSource, setAiSource] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [appliedAiIdea, setAppliedAiIdea] = useState(null);
+  const [form, setForm] = useState({
+    supplier_business_id: '',
+    supplier_product_id: '',
+    min_businesses_required: '5',
+    initial_commitment_units: '',
+  });
+
+  useEffect(() => {
+    const businessId = auth?.profile?.id;
+    Promise.allSettled([fetchProducts(), fetchSupplierProducts(), businessId ? fetchBusinessOrders(businessId) : Promise.resolve([])])
+      .then(([productsResult, supplierProductsResult, businessOrdersResult]) => {
+        const productsData = productsResult.status === 'fulfilled' ? productsResult.value : [];
+        const supplierProductsData = supplierProductsResult.status === 'fulfilled' ? supplierProductsResult.value : [];
+        const ordersData = businessOrdersResult.status === 'fulfilled' ? businessOrdersResult.value : [];
+        setProducts(productsData);
+        setSupplierProducts(supplierProductsData);
+        setBusinessOrders(ordersData);
+
+        if (supplierProductsData.length > 0) {
+          const firstSupplierProduct = supplierProductsData[0];
+          const firstSupplierId = firstSupplierProduct.supplier_business_id;
+          setForm((prev) => ({
+            ...prev,
+            supplier_business_id: prev.supplier_business_id || firstSupplierId,
+            supplier_product_id: prev.supplier_product_id || firstSupplierProduct.id,
+            initial_commitment_units: prev.initial_commitment_units || String(firstSupplierProduct.min_order_units || 1),
+          }));
+        }
+      })
+      .catch(() => {
+        setProducts([]);
+        setSupplierProducts([]);
+        setBusinessOrders([]);
+      })
+      .finally(() => {
+        setLoading(false);
+        setOrdersLoading(false);
+      });
+  }, [auth?.profile?.id]);
+
+  const selectedSupplierProduct = useMemo(
+    () => supplierProducts.find((item) => item.id === form.supplier_product_id) || null,
+    [supplierProducts, form.supplier_product_id]
+  );
+
+  const supplierOptions = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+    for (const item of supplierProducts) {
+      if (!seen.has(item.supplier_business_id)) {
+        seen.add(item.supplier_business_id);
+        options.push(item.supplier_business_id);
+      }
+    }
+    return options;
+  }, [supplierProducts]);
+
+  const supplierNamesById = useMemo(() => {
+    const map = {};
+    for (const item of supplierProducts) {
+      if (!map[item.supplier_business_id] && item.supplier_business_name) {
+        map[item.supplier_business_id] = item.supplier_business_name;
+      }
+    }
+    return map;
+  }, [supplierProducts]);
+
+  const supplierProductOptions = useMemo(
+    () => supplierProducts.filter((item) => item.supplier_business_id === form.supplier_business_id),
+    [supplierProducts, form.supplier_business_id]
+  );
+
+  const resolvedCatalogProduct = useMemo(() => {
+    if (!selectedSupplierProduct) return null;
+    const byName = products.find((item) => item.name === selectedSupplierProduct.name);
+    if (byName) return byName;
+
+    return (
+      products.find(
+        (item) =>
+          item.category?.toLowerCase() === selectedSupplierProduct.category?.toLowerCase() &&
+          item.material?.toLowerCase() === selectedSupplierProduct.material?.toLowerCase()
+      ) || null
+    );
+  }, [products, selectedSupplierProduct]);
+
+  const completedOrders = useMemo(
+    () => businessOrders.filter((order) => order.status === 'completed'),
+    [businessOrders]
+  );
+
+  const onGenerateAiIdeas = async () => {
+    const businessId = auth?.profile?.id;
+    if (!businessId) {
+      setAiError('Create/load your business profile before generating recommendations.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const response = await fetchGroupOpportunities({
+        business_id: businessId,
+        max_results: 3,
+      });
+      setAiIdeas(response.opportunities || []);
+      setAiSource(response.source || '');
+      if (!response.opportunities || response.opportunities.length === 0) {
+        setAiError('No launch opportunities right now. Try again after more supplier inventory is added.');
+      }
+    } catch (err) {
+      setAiError(String(err?.message || 'Failed to generate AI opportunities.'));
+      setAiIdeas([]);
+      setAiSource('');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const onApplyAiIdea = (idea) => {
+    const supplierBusinessId = idea?.supplier_business_id || '';
+    const supplierProductId = idea?.supplier_product_id || '';
+    setForm((prev) => ({
+      ...prev,
+      supplier_business_id: supplierBusinessId,
+      supplier_product_id: supplierProductId,
+      min_businesses_required: String(idea?.recommended_min_businesses_required || prev.min_businesses_required),
+      initial_commitment_units: String(idea?.recommended_initial_commitment_units || prev.initial_commitment_units),
+    }));
+    setAppliedAiIdea(idea);
+    setMessage('AI opportunity applied to form. Review and submit when ready.');
+    setError('');
+  };
+
+  const onChange = (key) => (event) => {
+    const value = event.target.value;
+    setError('');
+    setMessage('');
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const onSupplierChange = (event) => {
+    const supplierBusinessId = event.target.value;
+    const options = supplierProducts.filter((item) => item.supplier_business_id === supplierBusinessId);
+    const first = options[0] || null;
+    setError('');
+    setMessage('');
+    setForm((prev) => ({
+      ...prev,
+      supplier_business_id: supplierBusinessId,
+      supplier_product_id: first ? first.id : '',
+      initial_commitment_units: first ? String(first.min_order_units || 1) : prev.initial_commitment_units,
+    }));
+  };
+
+  const onSupplierProductChange = (event) => {
+    const supplierProductId = event.target.value;
+    const chosen = supplierProducts.find((item) => item.id === supplierProductId);
+    setError('');
+    setMessage('');
+    setForm((prev) => ({
+      ...prev,
+      supplier_product_id: supplierProductId,
+      initial_commitment_units: chosen ? String(chosen.min_order_units || 1) : prev.initial_commitment_units,
+    }));
+  };
+
+  const onSubmit = async (event) => {
+    event.preventDefault();
+    const businessId = auth?.profile?.id;
+    if (!businessId) {
+      setError('Create/load your business profile before proposing an order.');
+      return;
+    }
+
+    if (!form.supplier_business_id || !form.supplier_product_id) {
+      setError('Choose both a supplier and a product.');
+      return;
+    }
+
+    const minBusinessesRequired = Number(form.min_businesses_required);
+    const initialCommitmentUnits = Number(form.initial_commitment_units);
+
+    if (!Number.isFinite(minBusinessesRequired) || minBusinessesRequired <= 0) {
+      setError('Minimum businesses must be greater than 0.');
+      return;
+    }
+    if (!Number.isFinite(initialCommitmentUnits) || initialCommitmentUnits <= 0) {
+      setError('Your initial commitment must be greater than 0.');
+      return;
+    }
+
+    if (!selectedSupplierProduct) {
+      setError('Selected supplier product not found.');
+      return;
+    }
+    if (!resolvedCatalogProduct) {
+      setError('No matching catalog product found for this supplier listing.');
+      return;
+    }
+    if (initialCommitmentUnits > Number(selectedSupplierProduct.available_units)) {
+      setError(`Your requested units cannot exceed supplier inventory (${selectedSupplierProduct.available_units}).`);
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    try {
+      const aiPlanMatches = appliedAiIdea && appliedAiIdea.supplier_product_id === form.supplier_product_id;
+      const recommendedTargetUnits = Number(appliedAiIdea?.recommended_target_units);
+      const recommendedDeadlineDays = Number(appliedAiIdea?.recommended_deadline_days);
+      const targetUnits = aiPlanMatches && Number.isFinite(recommendedTargetUnits)
+        ? Math.min(Number(selectedSupplierProduct.available_units), Math.max(1, recommendedTargetUnits))
+        : Number(selectedSupplierProduct.available_units);
+      const deadline = aiPlanMatches && Number.isFinite(recommendedDeadlineDays) && recommendedDeadlineDays > 0
+        ? new Date(Date.now() + (recommendedDeadlineDays * 24 * 60 * 60 * 1000)).toISOString()
+        : null;
+
+      const group = await createGroup({
+        product_id: resolvedCatalogProduct.id,
+        created_by_business_id: businessId,
+        supplier_business_id: form.supplier_business_id,
+        supplier_product_id: form.supplier_product_id,
+        target_units: targetUnits,
+        min_businesses_required: minBusinessesRequired,
+        ...(deadline ? { deadline } : {}),
+      });
+
+      await joinGroup(group.id, businessId, initialCommitmentUnits);
+      setMessage('Group order proposed and your commitment was added.');
+      const refreshedOrders = await fetchBusinessOrders(businessId);
+      setBusinessOrders(refreshedOrders);
+      navigate('/groups');
+    } catch (err) {
+      setError(String(err?.message || 'Unable to create group order.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-cream text-ink">
+      <Navbar
+        solid
+        isAuthenticated={auth?.isAuthenticated}
+        onLogout={auth?.onLogout}
+        accountType={auth?.profile?.account_type}
+        tone="tan"
+      />
+
+      <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
+        <h1 className="text-3xl font-semibold">Propose Group Order</h1>
+        <p className="mt-2 text-sm text-ink/65">
+          Choose a supplier and product. Group capacity is set to the supplier's full available inventory.
+        </p>
+
+        <section className="mt-6 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">AI Group Launch Assistant</h2>
+              <p className="text-sm text-ink/65">Generate high-probability group opportunities from local demand and supplier inventory.</p>
+            </div>
+            <button
+              onClick={onGenerateAiIdeas}
+              disabled={aiLoading}
+              className="rounded bg-moss px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-sage disabled:opacity-60"
+            >
+              {aiLoading ? 'Generating...' : 'Generate Opportunities'}
+            </button>
+          </div>
+
+          {aiError ? <p className="mt-4 text-sm text-red-600">{aiError}</p> : null}
+
+          {aiIdeas.length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {aiIdeas.map((idea) => (
+                <article key={idea.supplier_product_id} className="rounded border border-black/10 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-base font-semibold">{idea.product_name}</p>
+                      <p className="text-xs text-ink/65">
+                        {idea.supplier_business_name || `Supplier ${String(idea.supplier_business_id || '').slice(0, 8)}`} | {idea.category} | {idea.material}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => onApplyAiIdea(idea)}
+                      className="rounded bg-black px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-ink"
+                    >
+                      Apply to Form
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink/70">
+                    <span>Target: {idea.recommended_target_units} units</span>
+                    <span>Min businesses: {idea.recommended_min_businesses_required}</span>
+                    <span>Deadline: {idea.recommended_deadline_days} days</span>
+                  </div>
+                  <p className="mt-2 text-sm text-ink/80"><strong>Outreach:</strong> {idea.outreach_copy}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Why:</strong> {idea.reasoning}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Evidence:</strong> {idea.evidence_used}</p>
+                  <p className="mt-1 text-xs text-ink/65"><strong>Risk:</strong> {idea.risk_note}</p>
+                </article>
+              ))}
+              <p className="text-xs uppercase tracking-[0.08em] text-ink/55">Source: {aiSource || 'unknown'}</p>
+            </div>
+          ) : null}
+        </section>
+
+        {loading ? (
+          <div className="mt-12 text-sm text-ink/60">Loading order data...</div>
+        ) : products.length === 0 || supplierProducts.length === 0 ? (
+          <div className="mt-12 text-sm text-ink/60">
+            {products.length === 0
+              ? 'No catalog products found. Seed products first.'
+              : 'No supplier listings found. A supplier must add inventory first.'}
+          </div>
+        ) : (
+          <section className="mt-8 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+            <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={onSubmit}>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Supplier</span>
+                <select
+                  value={form.supplier_business_id}
+                  onChange={onSupplierChange}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                >
+                  {supplierOptions.map((supplierId) => (
+                    <option key={supplierId} value={supplierId}>
+                      {supplierNamesById[supplierId] || `Supplier ${supplierId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Product</span>
+                <select
+                  value={form.supplier_product_id}
+                  onChange={onSupplierProductChange}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                >
+                  {supplierProductOptions.map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name} ({sp.available_units} available)
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Minimum Businesses</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.min_businesses_required}
+                  onChange={onChange('min_businesses_required')}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                />
+              </label>
+
+              <label className="text-sm md:col-span-2">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">Your Initial Commitment (Units)</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.initial_commitment_units}
+                  onChange={onChange('initial_commitment_units')}
+                  className="w-full rounded border border-black/15 px-3 py-2"
+                />
+              </label>
+
+              {selectedSupplierProduct ? (
+                <div className="rounded bg-emerald-50 p-3 text-sm text-ink/80 md:col-span-2">
+                  Group capacity (auto): <strong>{selectedSupplierProduct.available_units}</strong> units.
+                  Unit price: <strong>${Number(selectedSupplierProduct.unit_price).toFixed(2)}</strong>.
+                </div>
+              ) : null}
+
+              {error ? <p className="text-sm text-red-600 md:col-span-2">{error}</p> : null}
+              {message ? <p className="text-sm text-emerald-700 md:col-span-2">{message}</p> : null}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded bg-moss px-4 py-2 text-sm font-semibold text-white transition hover:bg-sage disabled:opacity-60 md:col-span-2"
+              >
+                {submitting ? 'Creating Group...' : 'Create Group Order'}
+              </button>
+            </form>
+          </section>
+        )}
+
+        <section className="mt-8 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold">Order History</h2>
+
+          {ordersLoading ? (
+            <p className="mt-4 text-sm text-ink/60">Loading order history...</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {completedOrders.length === 0 ? (
+                <p className="text-sm text-ink/60">No completed orders in history yet.</p>
+              ) : (
+                completedOrders.map((order) => (
+                  <article key={order.id} className="rounded-lg border border-black/10 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-base font-semibold">{order.group_display_name}</p>
+                        <p className="text-xs text-ink/65">
+                          {order.product_name ? `Product: ${order.product_name} | ` : ''}
+                          Your units: {order.your_units} | Total: {order.total_units}
+                        </p>
+                      </div>
+                      <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+                        {order.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {order.scheduled_start_at ? `Start: ${new Date(order.scheduled_start_at).toLocaleString()} | ` : ''}
+                      {order.estimated_end_at ? `End: ${new Date(order.estimated_end_at).toLocaleString()}` : 'End: TBD'}
+                    </p>
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Businesses Involved</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(order.participants || []).map((participant) => (
+                          <span key={participant.business_id} className="rounded-full bg-black/5 px-3 py-1 text-xs text-ink/75">
+                            {participant.business_name || participant.business_id.slice(0, 8)} ({participant.units})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="GreenSupply logo">
+  <g fill="none" stroke="#77A94F" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M45 82h40c6 0 11 4 13 10l22 76" stroke-width="10" />
+    <path d="M120 168l101-12c6-1 11-5 12-10l12-45" stroke-width="10" />
+    <path d="M116 168c-9 0-17 8-17 17s8 17 17 17h86" stroke-width="10" />
+    <path d="M171 163c1-20 8-36 21-48 12-12 28-19 45-23-1 18-6 33-16 44-11 12-25 20-42 24z" fill="#77A94F" stroke-width="3" />
+    <path d="M156 160c-1-13-5-23-12-31-8-8-19-13-33-17 1 15 5 26 12 35 8 8 19 13 33 13z" fill="#77A94F" stroke-width="3" />
+    <path d="M170 165l2-20" stroke-width="8" />
+  </g>
+</svg>

@@ -1,0 +1,124 @@
+import { useEffect, useState } from 'react';
+
+import { fetchBusinessDashboardSummary } from '../api';
+import Navbar from '../components/Navbar';
+
+function MetricCard({ label, value, unit }) {
+  return (
+    <article className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-sage">{label}</p>
+      <p className="mt-2 text-3xl font-semibold text-moss">{value}</p>
+      {unit ? <p className="mt-1 text-xs text-ink/60">{unit}</p> : null}
+    </article>
+  );
+}
+
+function SectionHeader({ title, description }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-lg font-semibold text-ink">{title}</h2>
+      {description ? <p className="mt-0.5 text-sm text-ink/60">{description}</p> : null}
+    </div>
+  );
+}
+
+export default function DashboardPage({ auth }) {
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const businessId = auth?.profile?.id;
+
+  useEffect(() => {
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchBusinessDashboardSummary(businessId)
+      .then(setSummary)
+      .catch((err) => setError(err.message || 'Failed to load dashboard'))
+      .finally(() => setLoading(false));
+  }, [businessId]);
+
+  const fmt = (n) => (n != null ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-');
+
+  return (
+    <div className="min-h-screen bg-cream text-ink">
+      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} tone="tan" />
+
+      <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
+        <h1 className="text-3xl font-semibold">Your Impact Dashboard</h1>
+        <p className="mt-2 text-sm text-ink/65">
+          Personal metrics for {auth?.profile?.name || 'your business'}
+        </p>
+
+        {loading ? (
+          <div className="mt-12 text-sm text-ink/60">Loading dashboard...</div>
+        ) : error ? (
+          <div className="mt-12 text-sm text-red-600">{error}</div>
+        ) : !summary ? (
+          <div className="mt-12 text-sm text-ink/60">No data available yet. Join a buying group to see your metrics.</div>
+        ) : (
+          <>
+            <section className="mt-8">
+              <SectionHeader title="Return on Investment" description="How much you've saved through bulk purchasing" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard
+                  label="Total Savings"
+                  value={`$${fmt(summary.your_total_savings_usd)}`}
+                  unit="saved through bulk pricing"
+                />
+                <MetricCard
+                  label="Weighted Savings Rate"
+                  value={`${fmt(summary.your_weighted_savings_pct)}%`}
+                  unit="average discount vs retail"
+                />
+              </div>
+            </section>
+
+            <section className="mt-8">
+              <SectionHeader title="Participation" description="Your buying group activity" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <MetricCard label="Groups Joined" value={summary.your_groups_joined} />
+                <MetricCard
+                  label="Conversion Rate"
+                  value={`${fmt(summary.your_group_conversion_rate)}%`}
+                  unit="groups confirmed or completed"
+                />
+                <MetricCard
+                  label="Median Time to Confirm"
+                  value={summary.your_median_time_to_confirmation_hours != null
+                    ? `${fmt(summary.your_median_time_to_confirmation_hours)}h`
+                    : '-'}
+                  unit="from your commitment to group confirmation"
+                />
+                <MetricCard
+                  label="Units Committed"
+                  value={summary.your_units_committed.toLocaleString()}
+                  unit="total units across all groups"
+                />
+              </div>
+            </section>
+
+            <section className="mt-8">
+              <SectionHeader title="Environmental Impact" description="Your contribution to sustainability" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard
+                  label="CO2 Avoided"
+                  value={fmt(summary.your_co2_saved_kg)}
+                  unit="kg of CO2 reduced"
+                />
+                <MetricCard
+                  label="Plastic Avoided"
+                  value={fmt(summary.your_plastic_avoided_kg)}
+                  unit="kg of plastic avoided"
+                />
+              </div>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}

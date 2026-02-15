@@ -1,0 +1,15 @@
+{
+  "short_name": "GreenSupply",
+  "name": "GreenSupply",
+  "icons": [
+    {
+      "src": "greensupply-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#2d4a3e",
+  "background_color": "#ebe7db"
+}
