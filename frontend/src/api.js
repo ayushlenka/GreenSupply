@@ -121,3 +121,8 @@ export function fetchBusinessOrders(businessId) {
   const query = new URLSearchParams({ business_id: businessId });
   return request(`/business-orders?${query.toString()}`);
 }
+
+export function fetchBusinessDashboardSummary(businessId) {
+  const query = new URLSearchParams({ business_id: businessId });
+  return request(`/dashboard/business-summary?${query.toString()}`);
+}

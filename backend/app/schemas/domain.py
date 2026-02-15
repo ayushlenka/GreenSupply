@@ -191,3 +191,14 @@ class BusinessOrderRead(BaseModel):
     your_units: int
     participants: list[BusinessOrderParticipantRead]
     created_at: datetime
+
+
+class BusinessDashboardSummaryRead(BaseModel):
+    your_total_savings_usd: float
+    your_weighted_savings_pct: float
+    your_groups_joined: int
+    your_group_conversion_rate: float
+    your_median_time_to_confirmation_hours: float | None = None
+    your_units_committed: int
+    your_co2_saved_kg: float
+    your_plastic_avoided_kg: float
