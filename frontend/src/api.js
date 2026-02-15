@@ -22,8 +22,12 @@ export function fetchMe() {
   return request('/auth/me');
 }
 
-export function fetchGroups() {
-  return request('/groups');
+export function fetchGroups(regionId) {
+  if (!Number.isFinite(regionId)) {
+    return request('/groups');
+  }
+  const query = new URLSearchParams({ region_id: String(regionId) });
+  return request(`/groups?${query.toString()}`);
 }
 
 export function fetchRegions() {
@@ -38,6 +42,13 @@ export function joinGroup(groupId, businessId, units) {
   return request(`/groups/${groupId}/join`, {
     method: 'POST',
     body: JSON.stringify({ business_id: businessId, units }),
+  });
+}
+
+export function supplierApproveGroup(groupId, supplierBusinessId) {
+  return request(`/groups/${groupId}/supplier-approve`, {
+    method: 'POST',
+    body: JSON.stringify({ supplier_business_id: supplierBusinessId }),
   });
 }
 

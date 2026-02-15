@@ -26,6 +26,7 @@ function twoMileBounds(centerLng, centerLat) {
 }
 
 export default function GroupsPage({ auth }) {
+  const regionId = auth?.profile?.region_id;
   const [groups, setGroups] = useState([]);
   const [regionsById, setRegionsById] = useState({});
   const [loading, setLoading] = useState(true);
@@ -47,9 +48,18 @@ export default function GroupsPage({ auth }) {
   const truckMarkerRef = useRef(null);
 
   useEffect(() => {
+    if (!Number.isFinite(regionId)) {
+      setGroups([]);
+      setRegionsById({});
+      setActiveId(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     let cancelled = false;
 
-    Promise.allSettled([fetchGroups(), fetchRegions()])
+    Promise.allSettled([fetchGroups(regionId), fetchRegions()])
       .then(([groupResult, regionResult]) => {
         if (cancelled) return;
 
@@ -62,6 +72,8 @@ export default function GroupsPage({ auth }) {
           setActiveId((currentActiveId) =>
             currentActiveId && groupData.some((group) => group.id === currentActiveId) ? currentActiveId : groupData[0].id
           );
+        } else {
+          setActiveId(null);
         }
       })
       .finally(() => {
@@ -71,7 +83,7 @@ export default function GroupsPage({ auth }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [regionId]);
 
   const activeGroup = groups.find((group) => group.id === activeId) || null;
   const commitments = activeGroupDetail?.commitments || [];
@@ -216,7 +228,7 @@ export default function GroupsPage({ auth }) {
       await joinGroup(groupId, businessId, units);
       setToast({ visible: true, message: `Joined! ${units.toLocaleString()} units committed.` });
       setModalGroup(null);
-      const updated = await fetchGroups();
+      const updated = await fetchGroups(regionId);
       setGroups(updated);
       if (groupId === activeId) {
         try {
@@ -477,6 +489,7 @@ export default function GroupsPage({ auth }) {
                     isActive={g.id === activeId}
                     onSelect={setActiveId}
                     onJoin={setModalGroup}
+                    currentBusinessId={auth?.profile?.id}
                     style={{ animationDelay: `${i * 0.04}s` }}
                   />
                 </div>

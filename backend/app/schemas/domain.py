@@ -67,6 +67,10 @@ class GroupJoinCreate(BaseModel):
     units: int
 
 
+class SupplierGroupApproveCreate(BaseModel):
+    supplier_business_id: str
+
+
 class GroupCommitmentRead(BaseModel):
     id: str
     business_id: str
@@ -81,6 +85,7 @@ class GroupCommitmentRead(BaseModel):
 class GroupRead(BaseModel):
     id: str
     status: str
+    created_by_business_id: str | None = None
     region_id: int | None = None
     supplier_business_id: str | None = None
     supplier_product_id: str | None = None

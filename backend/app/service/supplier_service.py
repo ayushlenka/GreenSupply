@@ -77,7 +77,7 @@ async def get_reserved_units_by_supplier_product(
         )
         .join(GroupCommitment, GroupCommitment.group_id == BuyingGroup.id)
         .where(
-            BuyingGroup.status == "active",
+            BuyingGroup.status.in_(["active", "capacity_reached"]),
             BuyingGroup.supplier_product_id.in_(supplier_product_ids),
         )
         .group_by(BuyingGroup.supplier_product_id)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { createSupplierProduct, fetchSupplierOrders, fetchSupplierProducts } from '../api';
+import { createSupplierProduct, fetchGroups, fetchSupplierOrders, fetchSupplierProducts, supplierApproveGroup } from '../api';
 import Navbar from '../components/Navbar';
 
 const PRODUCT_NAME_OPTIONS = [
@@ -31,9 +31,11 @@ const INIT_FORM = {
 export default function SupplierPage({ auth }) {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [approvalCandidates, setApprovalCandidates] = useState([]);
   const [form, setForm] = useState(INIT_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [approvingGroupId, setApprovingGroupId] = useState('');
   const [error, setError] = useState('');
 
   const supplierId = auth?.profile?.id;
@@ -42,9 +44,17 @@ export default function SupplierPage({ auth }) {
     if (!supplierId) return;
     setLoading(true);
     try {
-      const [p, o] = await Promise.all([fetchSupplierProducts(supplierId), fetchSupplierOrders(supplierId)]);
+      const [p, o, groups] = await Promise.all([fetchSupplierProducts(supplierId), fetchSupplierOrders(supplierId), fetchGroups()]);
       setProducts(p);
       setOrders(o);
+      const candidates = groups.filter(
+        (group) =>
+          group.supplier_business_id === supplierId &&
+          group.status === 'capacity_reached' &&
+          Number(group.current_units || 0) > 0 &&
+          Number(group.business_count || 0) < Number(group.min_businesses_required || 1)
+      );
+      setApprovalCandidates(candidates);
       setError('');
     } catch (err) {
       setError(String(err?.message || 'Failed to load supplier data'));
@@ -82,6 +92,19 @@ export default function SupplierPage({ auth }) {
       setError(String(err?.message || 'Failed to create supplier product'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onApprove = async (groupId) => {
+    if (!supplierId) return;
+    setApprovingGroupId(groupId);
+    try {
+      await supplierApproveGroup(groupId, supplierId);
+      await load();
+    } catch (err) {
+      setError(String(err?.message || 'Failed to approve group'));
+    } finally {
+      setApprovingGroupId('');
     }
   };
 
@@ -190,6 +213,36 @@ export default function SupplierPage({ auth }) {
               </ul>
             )}
           </article>
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 bg-white p-5">
+          <h2 className="text-lg font-semibold">Approval Needed</h2>
+          <p className="mt-1 text-sm text-ink/65">Confirm groups below the business minimum when inventory has been fully reserved.</p>
+          {loading ? (
+            <p className="mt-4 text-sm text-ink/60">Loading...</p>
+          ) : approvalCandidates.length === 0 ? (
+            <p className="mt-4 text-sm text-ink/60">No groups currently need supplier approval.</p>
+          ) : (
+            <ul className="mt-4 space-y-2 text-sm">
+              {approvalCandidates.map((group) => (
+                <li key={group.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-black/10 p-3">
+                  <div>
+                    <p className="font-medium">{group.product?.name || 'Group Order'}</p>
+                    <p className="text-ink/70">
+                      Group {group.id.slice(0, 8)} | Units: {group.current_units} | Businesses: {group.business_count}/{group.min_businesses_required}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded bg-moss px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    onClick={() => onApprove(group.id)}
+                    disabled={approvingGroupId === group.id}
+                  >
+                    {approvingGroupId === group.id ? 'Approving...' : 'Approve & Confirm'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-5">

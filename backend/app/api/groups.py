@@ -1,16 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
-from app.schemas.domain import GroupCreate, GroupDetailRead, GroupJoinCreate, GroupRead
-from app.service.group_service import create_group, get_group_details, join_group, list_active_groups
+from app.schemas.domain import GroupCreate, GroupDetailRead, GroupJoinCreate, GroupRead, SupplierGroupApproveCreate
+from app.service.group_service import create_group, get_group_details, join_group, list_active_groups, supplier_approve_group
 
 router = APIRouter(prefix="/groups")
 
 
 @router.get("", response_model=list[GroupRead])
-async def list_groups_endpoint(db: AsyncSession = Depends(get_db_session)) -> list[GroupRead]:
-    groups = await list_active_groups(db)
+async def list_groups_endpoint(
+    db: AsyncSession = Depends(get_db_session),
+    region_id: int | None = Query(default=None),
+) -> list[GroupRead]:
+    groups = await list_active_groups(db, region_id=region_id)
     return [GroupRead(**group) for group in groups]
 
 
@@ -51,6 +54,23 @@ async def join_group_endpoint(group_id: str, payload: GroupJoinCreate, db: Async
 
 @router.get("/{group_id}", response_model=GroupDetailRead)
 async def get_group_endpoint(group_id: str, db: AsyncSession = Depends(get_db_session)) -> GroupDetailRead:
+    details = await get_group_details(db, group_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return GroupDetailRead(**details)
+
+
+@router.post("/{group_id}/supplier-approve", response_model=GroupDetailRead)
+async def supplier_approve_group_endpoint(
+    group_id: str,
+    payload: SupplierGroupApproveCreate,
+    db: AsyncSession = Depends(get_db_session),
+) -> GroupDetailRead:
+    try:
+        await supplier_approve_group(db, group_id=group_id, supplier_business_id=payload.supplier_business_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     details = await get_group_details(db, group_id)
     if not details:
         raise HTTPException(status_code=404, detail="Group not found")

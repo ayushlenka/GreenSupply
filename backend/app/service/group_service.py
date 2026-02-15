@@ -85,8 +85,6 @@ async def create_group(
             raise ValueError("Supplier business not found")
         if supplier.account_type != "supplier":
             raise ValueError("supplier_business_id must reference a supplier account")
-        if supplier.region_id is not None and supplier.region_id != business.region_id:
-            raise ValueError("Supplier must be in the same region as the buying group")
     if supplier_product_id:
         supplier_product = await session.get(SupplierProduct, supplier_product_id)
         if not supplier_product:
@@ -154,24 +152,28 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
         raise ValueError("Businesses can only join groups in the same region")
     if group.status == "confirmed":
         raise ValueError("Group is already confirmed")
+    existing_commitment = await session.execute(
+        select(GroupCommitment.id).where(
+            GroupCommitment.group_id == group.id,
+            GroupCommitment.business_id == business.id,
+        )
+    )
+    if existing_commitment.first() is not None:
+        raise ValueError("Business has already joined this group")
 
     rollups = await _fetch_group_rollups(session, [group.id])
     current_units = int(rollups.get(group.id, {}).get("current_units", 0))
-    max_units_allowed = int(group.target_units)
-    if group.supplier_product_id:
-        supplier_product = await session.get(SupplierProduct, group.supplier_product_id)
-        if not supplier_product:
-            raise ValueError("Supplier product not found")
-        reserved_by_product = await get_reserved_units_by_supplier_product(
-            session,
-            [group.supplier_product_id],
-            exclude_group_id=group.id,
-        )
-        available_for_group = max(
-            0,
-            int(supplier_product.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
-        )
-        max_units_allowed = min(max_units_allowed, available_for_group)
+    business_count = int(rollups.get(group.id, {}).get("business_count", 0))
+    max_units_allowed, _, status_changed = await _sync_group_capacity_status(
+        session,
+        group,
+        current_units=current_units,
+        business_count=business_count,
+    )
+    if status_changed:
+        await session.commit()
+    if group.status == "capacity_reached" and current_units >= max_units_allowed:
+        raise ValueError("Group inventory capacity is filled; waiting on supplier restock")
 
     if current_units + units > max_units_allowed:
         remaining = max(0, max_units_allowed - current_units)
@@ -191,7 +193,30 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
     return commitment
 
 
-async def _maybe_confirm_group(session: AsyncSession, group_id: str) -> None:
+async def supplier_approve_group(session: AsyncSession, *, group_id: str, supplier_business_id: str) -> None:
+    group = await session.get(BuyingGroup, group_id)
+    if not group:
+        raise ValueError("Group not found")
+    if group.supplier_business_id is None:
+        raise ValueError("Group has no assigned supplier")
+    if group.supplier_business_id != supplier_business_id:
+        raise ValueError("Only the assigned supplier can approve this group")
+    if group.status == "confirmed":
+        raise ValueError("Group is already confirmed")
+
+    await _maybe_confirm_group(session, group_id, allow_supplier_override=True)
+
+    refreshed = await session.get(BuyingGroup, group_id)
+    if refreshed is None or refreshed.status != "confirmed":
+        raise ValueError("Group is not eligible for supplier approval yet")
+
+
+async def _maybe_confirm_group(
+    session: AsyncSession,
+    group_id: str,
+    *,
+    allow_supplier_override: bool = False,
+) -> None:
     group = await session.get(BuyingGroup, group_id)
     if not group or group.status == "confirmed":
         return
@@ -200,8 +225,22 @@ async def _maybe_confirm_group(session: AsyncSession, group_id: str) -> None:
     stats = rollups.get(group_id, {"current_units": 0, "business_count": 0})
     current_units = int(stats["current_units"])
     business_count = int(stats["business_count"])
+    _, _, status_changed = await _sync_group_capacity_status(
+        session,
+        group,
+        current_units=current_units,
+        business_count=business_count,
+    )
+    if status_changed:
+        await session.commit()
+        await session.refresh(group)
 
-    if business_count < int(group.min_businesses_required):
+    if current_units <= 0:
+        if allow_supplier_override:
+            raise ValueError("Cannot confirm a group with no committed units")
+        return
+
+    if business_count < int(group.min_businesses_required) and not allow_supplier_override:
         return
 
     supplier_product = None
@@ -307,6 +346,51 @@ async def _fetch_group_rollups(session: AsyncSession, group_ids: list[str]) -> d
     return rollups
 
 
+async def _compute_group_capacity(
+    session: AsyncSession,
+    group: BuyingGroup,
+    *,
+    exclude_group_reservations: bool = True,
+) -> tuple[int, int | None]:
+    max_capacity = int(group.target_units)
+    supplier_available_units: int | None = None
+    if group.supplier_product_id:
+        sp = await session.get(SupplierProduct, group.supplier_product_id)
+        if sp is None:
+            raise ValueError("Supplier product not found")
+        reserved_by_product = await get_reserved_units_by_supplier_product(
+            session,
+            [group.supplier_product_id],
+            exclude_group_id=group.id if exclude_group_reservations else None,
+        )
+        supplier_available_units = max(
+            0,
+            int(sp.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
+        )
+        max_capacity = min(max_capacity, supplier_available_units)
+    return max_capacity, supplier_available_units
+
+
+async def _sync_group_capacity_status(
+    session: AsyncSession,
+    group: BuyingGroup,
+    *,
+    current_units: int,
+    business_count: int,
+) -> tuple[int, int | None, bool]:
+    max_capacity, supplier_available_units = await _compute_group_capacity(session, group)
+    changed = False
+    if group.status != "confirmed":
+        if current_units >= max_capacity and business_count < int(group.min_businesses_required):
+            if group.status != "capacity_reached":
+                group.status = "capacity_reached"
+                changed = True
+        elif group.status == "capacity_reached" and current_units < max_capacity:
+            group.status = "active"
+            changed = True
+    return max_capacity, supplier_available_units, changed
+
+
 def _group_base_query() -> Select[tuple[BuyingGroup, Product]]:
     return (
         select(BuyingGroup, Product)
@@ -315,8 +399,11 @@ def _group_base_query() -> Select[tuple[BuyingGroup, Product]]:
     )
 
 
-async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
-    result = await session.execute(_group_base_query().where(BuyingGroup.status.in_(["active", "confirmed"])))
+async def list_active_groups(session: AsyncSession, region_id: int | None = None) -> list[dict[str, object]]:
+    stmt = _group_base_query().where(BuyingGroup.status.in_(["active", "capacity_reached", "confirmed"]))
+    if region_id is not None:
+        stmt = stmt.where(BuyingGroup.region_id == region_id)
+    result = await session.execute(stmt)
     rows = result.all()
 
     groups = [row[0] for row in rows]
@@ -324,33 +411,26 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
     rollups = await _fetch_group_rollups(session, [group.id for group in groups])
 
     payload: list[dict[str, object]] = []
+    has_status_updates = False
     for group in groups:
         product = products_by_group[group.id]
         rollup = rollups.get(group.id, {"current_units": 0, "business_count": 0})
         metrics = _build_group_metrics(product, rollup["current_units"], rollup["business_count"], group.target_units)
-        supplier_available_units = None
-        if group.supplier_product_id:
-            sp = await session.get(SupplierProduct, group.supplier_product_id)
-            if sp is not None:
-                reserved_by_product = await get_reserved_units_by_supplier_product(
-                    session,
-                    [group.supplier_product_id],
-                    exclude_group_id=group.id,
-                )
-                supplier_available_units = max(
-                    0,
-                    int(sp.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
-                )
-
-        max_capacity = int(group.target_units)
-        if supplier_available_units is not None:
-            max_capacity = min(max_capacity, supplier_available_units)
+        max_capacity, supplier_available_units, status_changed = await _sync_group_capacity_status(
+            session,
+            group,
+            current_units=int(rollup["current_units"]),
+            business_count=int(rollup["business_count"]),
+        )
+        if status_changed:
+            has_status_updates = True
         remaining_units = max(0, max_capacity - int(rollup["current_units"]))
 
         payload.append(
             {
                 "id": group.id,
                 "status": group.status,
+                "created_by_business_id": group.created_by_business_id,
                 "region_id": group.region_id,
                 "supplier_business_id": group.supplier_business_id,
                 "supplier_product_id": group.supplier_product_id,
@@ -372,6 +452,9 @@ async def list_active_groups(session: AsyncSession) -> list[dict[str, object]]:
             }
         )
 
+    if has_status_updates:
+        await session.commit()
+
     return payload
 
 
@@ -383,12 +466,18 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
 
     group, product = row
     rollups = await _fetch_group_rollups(session, [group.id])
-    metrics = _build_group_metrics(
-        product,
-        rollups.get(group.id, {}).get("current_units", 0),
-        rollups.get(group.id, {}).get("business_count", 0),
-        group.target_units,
+    current_units = int(rollups.get(group.id, {}).get("current_units", 0))
+    business_count = int(rollups.get(group.id, {}).get("business_count", 0))
+    max_capacity, supplier_available_units, status_changed = await _sync_group_capacity_status(
+        session,
+        group,
+        current_units=current_units,
+        business_count=business_count,
     )
+    if status_changed:
+        await session.commit()
+        await session.refresh(group)
+    metrics = _build_group_metrics(product, current_units, business_count, group.target_units)
 
     commitments_result = await session.execute(
         select(GroupCommitment, Business)
@@ -397,22 +486,6 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
         .order_by(GroupCommitment.created_at.asc())
     )
     commitments = commitments_result.all()
-    supplier_available_units = None
-    if group.supplier_product_id:
-        sp = await session.get(SupplierProduct, group.supplier_product_id)
-        if sp is not None:
-            reserved_by_product = await get_reserved_units_by_supplier_product(
-                session,
-                [group.supplier_product_id],
-                exclude_group_id=group.id,
-            )
-            supplier_available_units = max(
-                0,
-                int(sp.available_units) - int(reserved_by_product.get(group.supplier_product_id, 0)),
-            )
-    max_capacity = int(group.target_units)
-    if supplier_available_units is not None:
-        max_capacity = min(max_capacity, supplier_available_units)
     remaining_units = max(0, max_capacity - int(metrics["current_units"]))
 
     confirmed_order_result = await session.execute(

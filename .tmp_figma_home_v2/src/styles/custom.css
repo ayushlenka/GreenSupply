@@ -1,0 +1,5 @@
+/* Custom Map Styles */
+.leaflet-container {
+  font-family: var(--font-sans);
+  touch-action: pan-x pan-y; /* Better touch support on mobile */
+}

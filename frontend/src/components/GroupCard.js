@@ -1,4 +1,4 @@
-export default function GroupCard({ group, isActive, onSelect, onJoin, style }) {
+export default function GroupCard({ group, isActive, onSelect, onJoin, style, currentBusinessId }) {
   const product = group.product || {};
   const pct = Math.round(group.progress_pct || 0);
   const fillClass = pct < 40 ? 'bg-amber-500' : pct < 75 ? 'bg-sage' : 'bg-moss';
@@ -13,7 +13,31 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
   const remainingUnits = Number.isFinite(group.remaining_units)
     ? group.remaining_units
     : Math.max(0, (group.target_units || 0) - (group.current_units || 0));
-  const joinDisabled = group.status === 'confirmed' || remainingUnits <= 0;
+  const alreadyJoined = Boolean(currentBusinessId && group.created_by_business_id === currentBusinessId);
+  const isConfirmed = group.status === 'confirmed';
+  const isCapacityReached = group.status === 'capacity_reached';
+  const joinDisabled = isConfirmed || isCapacityReached || remainingUnits <= 0 || alreadyJoined;
+  const joinLabel = alreadyJoined
+    ? 'Already Joined'
+    : isConfirmed
+      ? 'Confirmed'
+      : isCapacityReached
+        ? 'Inventory Filled'
+        : joinDisabled
+          ? 'Unavailable'
+          : 'Join This Group';
+  const statusLabel =
+    group.status === 'confirmed'
+      ? 'Confirmed'
+      : group.status === 'capacity_reached'
+        ? 'Inventory Filled'
+        : 'Active';
+  const statusClass =
+    group.status === 'confirmed'
+      ? 'bg-sky-50 text-sky-700'
+      : group.status === 'capacity_reached'
+        ? 'bg-amber-50 text-amber-700'
+        : 'bg-emerald-50 text-emerald-700';
 
   return (
     <article
@@ -28,9 +52,14 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
     >
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-base font-semibold text-ink">{product.name || group.id}</h3>
-        <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-emerald-700">
-          {category || 'group'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.09em] ${statusClass}`}>
+            {statusLabel}
+          </span>
+          <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-emerald-700">
+            {category || 'group'}
+          </span>
+        </div>
       </div>
 
       <div className="mt-4">
@@ -49,7 +78,7 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
         <span>Save ${savingsPerUnit}/unit</span>
         <span>{group.business_count || 0} businesses</span>
         <span>{remainingUnits} units left</span>
-        {daysLeft !== null ? <span>{daysLeft}d left</span> : null}
+        {!isConfirmed && daysLeft !== null ? <span>{daysLeft}d left</span> : null}
       </div>
 
       <button
@@ -60,7 +89,7 @@ export default function GroupCard({ group, isActive, onSelect, onJoin, style }) 
         }}
         disabled={joinDisabled}
       >
-        {joinDisabled ? 'Unavailable' : 'Join This Group'}
+        {joinLabel}
       </button>
     </article>
   );
