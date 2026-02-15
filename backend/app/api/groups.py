@@ -12,8 +12,9 @@ router = APIRouter(prefix="/groups")
 async def list_groups_endpoint(
     db: AsyncSession = Depends(get_db_session),
     region_id: int | None = Query(default=None),
+    business_id: str | None = Query(default=None),
 ) -> list[GroupRead]:
-    groups = await list_active_groups(db, region_id=region_id)
+    groups = await list_active_groups(db, region_id=region_id, business_id=business_id)
     return [GroupRead(**group) for group in groups]
 
 

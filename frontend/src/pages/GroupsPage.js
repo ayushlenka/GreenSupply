@@ -54,7 +54,7 @@ export default function GroupsPage({ auth }) {
     setLoading(true);
     let cancelled = false;
 
-    Promise.allSettled([fetchGroups(regionId), fetchRegions()])
+    Promise.allSettled([fetchGroups(regionId, auth?.profile?.id), fetchRegions()])
       .then(([groupResult, regionResult]) => {
         if (cancelled) return;
 
@@ -78,7 +78,7 @@ export default function GroupsPage({ auth }) {
     return () => {
       cancelled = true;
     };
-  }, [regionId]);
+  }, [regionId, auth?.profile?.id]);
 
   const activeGroup = groups.find((group) => group.id === activeId) || null;
   const commitments = useMemo(() => activeGroupDetail?.commitments || [], [activeGroupDetail]);
@@ -224,7 +224,7 @@ export default function GroupsPage({ auth }) {
       await joinGroup(groupId, businessId, units);
       setToast({ visible: true, message: `Joined! ${units.toLocaleString()} units committed.` });
       setModalGroup(null);
-      const updated = await fetchGroups(regionId);
+      const updated = await fetchGroups(regionId, businessId);
       setGroups(updated);
       if (groupId === activeId) {
         try {
@@ -250,7 +250,8 @@ export default function GroupsPage({ auth }) {
     return groups.filter(
       (g) =>
         g.status === 'active' ||
-        ((g.status === 'capacity_reached' || g.status === 'pending') && g.created_by_business_id === currentBusinessId)
+        ((g.status === 'capacity_reached' || g.status === 'pending') &&
+          (g.created_by_business_id === currentBusinessId || g.joined_by_business))
     );
   }, [groups, statusFilter, auth?.profile?.id]);
 

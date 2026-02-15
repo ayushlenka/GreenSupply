@@ -447,7 +447,11 @@ def _group_base_query() -> Select:
     )
 
 
-async def list_active_groups(session: AsyncSession, region_id: int | None = None) -> list[dict[str, object]]:
+async def list_active_groups(
+    session: AsyncSession,
+    region_id: int | None = None,
+    business_id: str | None = None,
+) -> list[dict[str, object]]:
     await _complete_finished_orders(session)
     stmt = _group_base_query().where(BuyingGroup.status.in_(["active", "capacity_reached", "confirmed"]))
     if region_id is not None:
@@ -481,6 +485,15 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
             select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id.in_(group_ids))
         )
         confirmed_orders_map = {order.group_id: order for order in confirmed_orders_result.scalars().all()}
+    joined_group_ids: set[str] = set()
+    if business_id and group_ids:
+        joined_result = await session.execute(
+            select(GroupCommitment.group_id).where(
+                GroupCommitment.group_id.in_(group_ids),
+                GroupCommitment.business_id == business_id,
+            )
+        )
+        joined_group_ids = {str(gid) for (gid,) in joined_result.all()}
 
     payload: list[dict[str, object]] = []
     has_status_updates = False
@@ -527,6 +540,7 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
                 "id": group.id,
                 "status": group.status,
                 "created_by_business_id": group.created_by_business_id,
+                "joined_by_business": str(group.id) in joined_group_ids,
                 "region_id": group.region_id,
                 "group_center_latitude": center_lat,
                 "group_center_longitude": center_lng,

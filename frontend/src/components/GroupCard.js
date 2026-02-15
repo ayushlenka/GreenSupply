@@ -16,7 +16,10 @@ export default memo(function GroupCard({ group, isActive, onSelect, onJoin, styl
   const remainingUnits = Number.isFinite(group.remaining_units)
     ? group.remaining_units
     : Math.max(0, (group.target_units || 0) - (group.current_units || 0));
-  const alreadyJoined = Boolean(currentBusinessId && group.created_by_business_id === currentBusinessId);
+  const alreadyJoined = Boolean(
+    currentBusinessId &&
+      (group.created_by_business_id === currentBusinessId || group.joined_by_business === true)
+  );
   const isConfirmed = group.status === 'confirmed';
   const isCapacityReached = group.status === 'capacity_reached';
   const joinDisabled = isConfirmed || isCapacityReached || remainingUnits <= 0 || alreadyJoined;
