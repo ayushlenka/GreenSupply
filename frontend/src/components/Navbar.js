@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import greensupplyLogo from '../assets/greensupply-logo.svg';
 
 export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = true, accountType, onGoogleLogin, tone = 'default' }) {
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
   const navCls = tone === 'tan'
     ? (solid
       ? 'fixed top-0 left-0 right-0 z-50 border-b border-[rgba(107,128,116,0.16)] bg-[#ebe7db]/95 backdrop-blur'
@@ -18,6 +20,18 @@ export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = t
 
   const isSupplier = accountType === 'supplier';
 
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
+  const navLinks = isSupplier
+    ? [{ to: '/supplier', label: 'Supplier Dashboard' }]
+    : [
+        { to: '/groups', label: 'Groups' },
+        { to: '/products', label: 'Orders' },
+        { to: '/dashboard', label: 'Dashboard' },
+      ];
+
   return (
     <nav className={`${navCls} px-4 py-4 sm:px-7`}>
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
@@ -27,35 +41,44 @@ export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = t
         </Link>
 
         {showLinks && isAuthenticated ? (
-          <div className="flex items-center gap-5 sm:gap-7">
-            {isSupplier ? (
-              <Link to="/supplier" className={linkCls('/supplier')}>
-                Supplier Dashboard
-              </Link>
-            ) : (
-              <>
-                <Link to="/groups" className={linkCls('/groups')}>
-                  Groups
+          <>
+            <div className="hidden items-center gap-5 sm:gap-7 md:flex">
+              {navLinks.map((item) => (
+                <Link key={item.to} to={item.to} className={linkCls(item.to)}>
+                  {item.label}
                 </Link>
-                <Link to="/products" className={linkCls('/products')}>
-                  Orders
-                </Link>
-                <Link to="/dashboard" className={linkCls('/dashboard')}>
-                  Dashboard
-                </Link>
-              </>
-            )}
+              ))}
+              <button
+                onClick={onLogout}
+                className="rounded bg-moss px-3 py-2 text-xs font-medium uppercase tracking-[0.1em] text-white transition hover:bg-sage"
+              >
+                Logout
+              </button>
+            </div>
+
             <button
-              onClick={onLogout}
-              className="rounded bg-moss px-3 py-2 text-xs font-medium uppercase tracking-[0.1em] text-white transition hover:bg-sage"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded border border-black/15 text-ink md:hidden"
+              aria-label="Toggle navigation menu"
+              aria-expanded={menuOpen}
             >
-              Logout
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {menuOpen ? (
+                  <path d="M18 6L6 18M6 6l12 12" />
+                ) : (
+                  <>
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
+                  </>
+                )}
+              </svg>
             </button>
-          </div>
+          </>
         ) : !isAuthenticated && onGoogleLogin ? (
           <button
             onClick={onGoogleLogin}
-            className="inline-flex items-center gap-3 rounded-xl border border-[#DADCE0] bg-white px-5 py-2.5 text-[15px] font-medium text-[#3c4043] shadow-sm transition hover:bg-[#F8F9FA]"
+            className="inline-flex items-center gap-3 rounded-xl border border-[#DADCE0] bg-white px-3 py-2 text-[13px] font-medium text-[#3c4043] shadow-sm transition hover:bg-[#F8F9FA] sm:px-5 sm:py-2.5 sm:text-[15px]"
           >
             <svg
               width="20"
@@ -81,10 +104,35 @@ export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = t
                 d="M43.611 20.083H42V20H24v8h11.303a12.05 12.05 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
               />
             </svg>
-            Sign in with Google
+            <span className="hidden sm:inline">Sign in with Google</span>
+            <span className="sm:hidden">Sign In</span>
           </button>
         ) : null}
       </div>
+
+      {showLinks && isAuthenticated && menuOpen ? (
+        <div className="mx-auto mt-3 w-full max-w-7xl rounded-lg border border-black/10 bg-white/95 p-3 shadow-sm md:hidden">
+          <div className="flex flex-col gap-2">
+            {navLinks.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={`rounded px-3 py-2 text-sm ${
+                  location.pathname === item.to ? 'bg-moss/10 text-moss' : 'text-ink/80'
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <button
+              onClick={onLogout}
+              className="mt-1 rounded bg-moss px-3 py-2 text-xs font-medium uppercase tracking-[0.1em] text-white transition hover:bg-sage"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      ) : null}
     </nav>
   );
 }

@@ -184,6 +184,26 @@ export default function GroupsPage({ auth }) {
   }, [mapReady, activeGroup, applyBoundsForGroup]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapContainer.current) return;
+
+    const resize = () => map.resize();
+    resize();
+    window.addEventListener('resize', resize);
+
+    let observer;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(resize);
+      observer.observe(mapContainer.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', resize);
+      if (observer) observer.disconnect();
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
     if (!activeId) {
       setActiveGroupDetail(null);
       setSupplierBusiness(null);
@@ -254,8 +274,8 @@ export default function GroupsPage({ auth }) {
     }
   };
 
-  const userLat = auth?.profile?.latitude;
-  const userLng = auth?.profile?.longitude;
+  const userLat = Number(auth?.profile?.latitude);
+  const userLng = Number(auth?.profile?.longitude);
   const hasUserLocation = Number.isFinite(userLat) && Number.isFinite(userLng);
 
   const categories = [...new Set(groups.map((g) => (g.product?.category || '').toLowerCase()))].filter(Boolean);
@@ -265,13 +285,17 @@ export default function GroupsPage({ auth }) {
 
     if (sort === 'nearest' && hasUserLocation) {
       filtered.sort((a, b) => {
-        const aHas = Number.isFinite(a.group_center_latitude) && Number.isFinite(a.group_center_longitude);
-        const bHas = Number.isFinite(b.group_center_latitude) && Number.isFinite(b.group_center_longitude);
+        const aLat = Number(a.group_center_latitude);
+        const aLng = Number(a.group_center_longitude);
+        const bLat = Number(b.group_center_latitude);
+        const bLng = Number(b.group_center_longitude);
+        const aHas = Number.isFinite(aLat) && Number.isFinite(aLng);
+        const bHas = Number.isFinite(bLat) && Number.isFinite(bLng);
         if (!aHas && !bHas) return 0;
         if (!aHas) return 1;
         if (!bHas) return -1;
-        const distA = haversineDistance(userLat, userLng, a.group_center_latitude, a.group_center_longitude);
-        const distB = haversineDistance(userLat, userLng, b.group_center_latitude, b.group_center_longitude);
+        const distA = haversineDistance(userLat, userLng, aLat, aLng);
+        const distB = haversineDistance(userLat, userLng, bLat, bLng);
         return distA - distB;
       });
     } else if (sort === 'deadline') {
@@ -308,7 +332,13 @@ export default function GroupsPage({ auth }) {
       truckMarkerRef.current = null;
     }
 
-    const participants = commitments.filter((c) => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+    const participants = commitments
+      .map((c) => ({
+        ...c,
+        latitude: Number(c.latitude),
+        longitude: Number(c.longitude),
+      }))
+      .filter((c) => Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
     participants.forEach((commitment) => {
       const el = document.createElement('button');
       el.className = 'participant-dot';
@@ -344,7 +374,9 @@ export default function GroupsPage({ auth }) {
       participantMarkersRef.current.push(marker);
     });
 
-    if (supplierBusiness && Number.isFinite(supplierBusiness.latitude) && Number.isFinite(supplierBusiness.longitude)) {
+    const supplierLat = Number(supplierBusiness?.latitude);
+    const supplierLng = Number(supplierBusiness?.longitude);
+    if (supplierBusiness && Number.isFinite(supplierLat) && Number.isFinite(supplierLng)) {
       const supplierEl = document.createElement('div');
       supplierEl.className = 'supplier-dot';
 
@@ -367,7 +399,7 @@ export default function GroupsPage({ auth }) {
         supplierPopupNode
       );
 
-      const supplierLngLat = [Number(supplierBusiness.longitude), Number(supplierBusiness.latitude)];
+      const supplierLngLat = [supplierLng, supplierLat];
       supplierMarkerRef.current = new mapboxgl.Marker({ element: supplierEl, anchor: 'center' })
         .setLngLat(supplierLngLat)
         .setPopup(supplierClickPopup)
@@ -379,8 +411,8 @@ export default function GroupsPage({ auth }) {
     }
 
     const allPoints = [
-      ...(supplierBusiness && Number.isFinite(supplierBusiness.latitude) && Number.isFinite(supplierBusiness.longitude)
-        ? [[Number(supplierBusiness.longitude), Number(supplierBusiness.latitude)]]
+      ...(supplierBusiness && Number.isFinite(supplierLat) && Number.isFinite(supplierLng)
+        ? [[supplierLng, supplierLat]]
         : []),
       ...participants.map((c) => [Number(c.longitude), Number(c.latitude)]),
     ];
@@ -393,9 +425,9 @@ export default function GroupsPage({ auth }) {
     }
 
     const rawRoute = confirmedOrder?.route_points || [];
-    const routePoints = rawRoute.filter(
-      (pt) => Array.isArray(pt) && pt.length === 2 && Number.isFinite(pt[0]) && Number.isFinite(pt[1])
-    );
+    const routePoints = rawRoute
+      .map((pt) => (Array.isArray(pt) && pt.length === 2 ? [Number(pt[0]), Number(pt[1])] : null))
+      .filter((pt) => pt && Number.isFinite(pt[0]) && Number.isFinite(pt[1]));
 
     const clearRoute = () => {
       if (map.getLayer(ROUTE_GLOW_LAYER_ID)) map.removeLayer(ROUTE_GLOW_LAYER_ID);
@@ -463,12 +495,16 @@ export default function GroupsPage({ auth }) {
   }, [mapReady, commitments, supplierBusiness, confirmedOrder, routeProgress, activeGroupDetail?.status]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-ink">
-      <div ref={mapContainer} className="absolute inset-0" />
-      <Navbar solid={false} isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} />
+    <div className="min-h-screen overflow-hidden bg-ink">
+      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} accountType={auth?.profile?.account_type} />
 
-      <aside className="relative z-30 ml-auto flex h-screen w-full max-w-xl flex-col bg-cream shadow-2xl">
-        <div className="border-b border-black/10 px-5 pb-5 pt-20 sm:px-7">
+      <div className="relative h-[calc(100vh-4rem)]">
+        <div className="h-[42%] lg:absolute lg:inset-0 lg:h-auto">
+          <div ref={mapContainer} className="h-full w-full" />
+        </div>
+
+        <aside className="relative z-30 ml-auto flex h-[58%] w-full max-w-xl flex-col bg-cream shadow-2xl lg:h-full">
+          <div className="border-b border-black/10 px-5 pb-5 pt-5 sm:px-7">
           <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco - {groups.length} active groups</p>
           <h1 className="mt-2 text-3xl font-semibold text-ink">Buying Groups</h1>
           <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink/70">
@@ -484,7 +520,7 @@ export default function GroupsPage({ auth }) {
           </div>
         </div>
 
-        <div className="border-b border-black/10 px-5 py-3 sm:px-7">
+          <div className="border-b border-black/10 px-5 py-3 sm:px-7">
           <div className="flex flex-wrap gap-2">
             <button
               className={`rounded-full border px-3 py-1 text-xs ${filter === 'all' ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'}`}
@@ -530,7 +566,7 @@ export default function GroupsPage({ auth }) {
           ) : null}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {loading ? (
             <div className="py-10 text-center text-sm text-ink/60">Loading groups...</div>
           ) : filteredGroups.length === 0 ? (
@@ -553,8 +589,9 @@ export default function GroupsPage({ auth }) {
               ))}
             </div>
           )}
-        </div>
-      </aside>
+          </div>
+        </aside>
+      </div>
 
       <JoinModal group={modalGroup} open={!!modalGroup} onClose={() => setModalGroup(null)} onSubmit={handleJoin} />
       <Toast message={toast.message} visible={toast.visible} onHide={() => setToast((t) => ({ ...t, visible: false }))} />
