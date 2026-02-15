@@ -22,11 +22,17 @@ export function fetchMe() {
   return request('/auth/me');
 }
 
-export function fetchGroups(regionId) {
-  if (!Number.isFinite(regionId)) {
+export function fetchGroups(regionId, businessId) {
+  if (!Number.isFinite(regionId) && !businessId) {
     return request('/groups');
   }
-  const query = new URLSearchParams({ region_id: String(regionId) });
+  const query = new URLSearchParams();
+  if (Number.isFinite(regionId)) {
+    query.set('region_id', String(regionId));
+  }
+  if (businessId) {
+    query.set('business_id', String(businessId));
+  }
   return request(`/groups?${query.toString()}`);
 }
 
