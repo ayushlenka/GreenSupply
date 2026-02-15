@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 
 import { getGoogleLoginUrl } from '../auth';
+import cafeImage from '../assets/cafe.jpg';
 import greensupplyLogo from '../assets/greensupply-logo.svg';
 import Navbar from '../components/Navbar';
 
@@ -76,6 +77,23 @@ export default function HomePage({ auth }) {
               </button>
             ) : null}
 
+            <div className="mt-9 max-w-3xl">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-[rgba(107,128,116,0.22)] bg-[#f7f5ef] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#2d4a3e]">
+                  Region-based group matching
+                </span>
+                <span className="rounded-full border border-[rgba(107,128,116,0.22)] bg-[#f7f5ef] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#2d4a3e]">
+                  Supplier inventory-aware capacity
+                </span>
+                <span className="rounded-full border border-[rgba(107,128,116,0.22)] bg-[#f7f5ef] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#2d4a3e]">
+                  Scheduled delivery confirmations
+                </span>
+                <span className="rounded-full border border-[rgba(107,128,116,0.22)] bg-[#f7f5ef] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#2d4a3e]">
+                  Business and supplier workflows
+                </span>
+              </div>
+            </div>
+
           </div>
         </section>
 
@@ -105,8 +123,8 @@ export default function HomePage({ auth }) {
             </div>
             <div className="overflow-hidden rounded-3xl shadow-2xl">
               <img
-                src="https://images.unsplash.com/photo-1677207857573-cf0743756077?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzYW4lMjBmcmFuY2lzY28lMjBwYWludGVkJTIwbGFkaWVzJTIwdmljdG9yaWFuJTIwaG91c2VzfGVufDF8fHx8MTc3MTEwODQxOHww&ixlib=rb-4.1.0&q=80&w=1080"
-                alt="San Francisco Painted Ladies Victorian houses"
+                src={cafeImage}
+                alt="San Francisco neighborhood cafe storefront"
                 className="h-full w-full object-cover"
               />
             </div>

@@ -110,7 +110,7 @@ export default function SupplierPage({ auth }) {
 
   return (
     <div className="min-h-screen bg-cream text-ink">
-      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} accountType="supplier" />
+      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} accountType="supplier" tone="tan" />
 
       <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">
         <h1 className="text-3xl font-semibold">Supplier Dashboard</h1>

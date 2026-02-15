@@ -254,10 +254,6 @@ export default function GroupsPage({ auth }) {
     );
   }, [groups, statusFilter, auth?.profile?.id]);
 
-  const totalBusinesses = groups.reduce((s, g) => s + (g.business_count || 0), 0);
-  const totalSavings = groups.reduce((s, g) => s + (g.estimated_savings_usd || 0), 0);
-  const totalTrips = groups.reduce((s, g) => s + (g.delivery_trips_reduced || 0), 0);
-
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -387,17 +383,6 @@ export default function GroupsPage({ auth }) {
           <div className="border-b border-black/10 px-5 pb-5 pt-5 sm:px-7">
           <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco - {groups.length} active groups</p>
           <h1 className="mt-2 text-3xl font-semibold text-ink">Buying Groups</h1>
-          <div className="mt-4 flex flex-wrap gap-4 text-xs text-ink/70">
-            <span>
-              <strong className="text-moss">{totalBusinesses}</strong> businesses joined
-            </span>
-            <span>
-              <strong className="text-moss">${totalSavings.toFixed(0)}</strong> unlocked
-            </span>
-            <span>
-              <strong className="text-moss">{totalTrips}</strong> trips saved
-            </span>
-          </div>
         </div>
 
           <div className="border-b border-black/10 px-5 py-3 sm:px-7">

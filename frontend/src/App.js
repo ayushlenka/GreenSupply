@@ -120,13 +120,14 @@ function App() {
           }
         />
         <Route
-          path="/products"
+          path="/orders"
           element={
             <ProtectedRoute isAuthenticated={businessAllowed} isLoading={auth.isLoading}>
               <ProductsPage auth={auth} />
             </ProtectedRoute>
           }
         />
+        <Route path="/products" element={<Navigate to="/orders" replace />} />
         <Route
           path="/dashboard"
           element={

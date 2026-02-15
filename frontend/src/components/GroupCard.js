@@ -20,10 +20,10 @@ export default memo(function GroupCard({ group, isActive, onSelect, onJoin, styl
   const isConfirmed = group.status === 'confirmed';
   const isCapacityReached = group.status === 'capacity_reached';
   const joinDisabled = isConfirmed || isCapacityReached || remainingUnits <= 0 || alreadyJoined;
-  const joinLabel = alreadyJoined
-    ? 'Already Joined'
-    : isConfirmed
-      ? 'Confirmed'
+  const joinLabel = isConfirmed
+    ? 'Confirmed'
+    : alreadyJoined
+      ? 'Already Joined'
       : isCapacityReached
         ? 'Inventory Filled'
         : joinDisabled
@@ -82,7 +82,6 @@ export default memo(function GroupCard({ group, isActive, onSelect, onJoin, styl
         <span>
           {group.business_count || 0}/{group.min_businesses_required || 0} businesses
         </span>
-        <span>{remainingUnits} units left</span>
         {!isConfirmed && daysLeft !== null ? <span>{daysLeft}d left</span> : null}
       </div>
       {isConfirmed && scheduledStart ? (

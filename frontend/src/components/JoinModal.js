@@ -66,7 +66,6 @@ export default function JoinModal({ group, open, onClose, onSubmit }) {
         <p className="text-xs uppercase tracking-[0.12em] text-sage">Join Buying Group</p>
         <h2 className="mt-1 text-2xl font-semibold text-ink">{product.name || 'Product'}</h2>
         <p className="mt-1 text-sm text-ink/60">{product.category || ''}</p>
-        <p className="mt-1 text-sm text-ink/70">Remaining capacity: {maxAllowed} units</p>
 
         <div className="mt-6">
           <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.1em] text-ink/70">

@@ -3,7 +3,14 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.service.group_service import _build_group_metrics, _maybe_confirm_group, create_group, join_group
+from app.service.group_service import (
+    _build_group_metrics,
+    _maybe_confirm_group,
+    _remaining_units_for_group,
+    create_group,
+    join_group,
+    supplier_approve_group,
+)
 
 
 class _ExecResult:
@@ -16,6 +23,22 @@ class _ExecResult:
 
     def all(self):
         return self._rows
+
+    def first(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
+    def scalars(self):
+        return _ScalarRows(self._rows)
+
+
+class _ScalarRows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
 
 
 class _Session:
@@ -108,6 +131,7 @@ class TestGroupService(unittest.IsolatedAsyncioTestCase):
         group = SimpleNamespace(
             id="g1",
             status="active",
+            target_units=200,
             min_businesses_required=2,
             supplier_business_id="s1",
             supplier_product_id="sp1",
@@ -139,6 +163,7 @@ class TestGroupService(unittest.IsolatedAsyncioTestCase):
         group = SimpleNamespace(
             id="g2",
             status="active",
+            target_units=200,
             min_businesses_required=2,
             supplier_business_id="s1",
             supplier_product_id="sp2",
@@ -187,3 +212,75 @@ class TestGroupService(unittest.IsolatedAsyncioTestCase):
                 await join_group(session, group_id="g3", business_id="b1", units=6)
 
         self.assertIn("remaining group capacity", str(ctx.exception))
+
+    async def test_join_group_rejects_completed_group(self):
+        group = SimpleNamespace(
+            id="g4",
+            status="completed",
+            target_units=100,
+            supplier_product_id=None,
+            region_id=2,
+        )
+        business = SimpleNamespace(id="b1", account_type="business", region_id=2)
+        session = _Session(
+            gets={
+                ("BuyingGroup", "g4"): group,
+                ("Business", "b1"): business,
+            }
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            await join_group(session, group_id="g4", business_id="b1", units=10)
+
+        self.assertEqual(str(ctx.exception), "Group is no longer open for joining")
+
+    async def test_supplier_approve_group_rejects_completed_group(self):
+        group = SimpleNamespace(
+            id="g5",
+            status="completed",
+            supplier_business_id="s1",
+        )
+        session = _Session(gets={("BuyingGroup", "g5"): group})
+
+        with self.assertRaises(ValueError) as ctx:
+            await supplier_approve_group(session, group_id="g5", supplier_business_id="s1")
+
+        self.assertEqual(str(ctx.exception), "Group is no longer eligible for supplier approval")
+
+    async def test_maybe_confirm_skips_completed_group(self):
+        group = SimpleNamespace(
+            id="g6",
+            status="completed",
+            target_units=100,
+            min_businesses_required=1,
+            supplier_business_id=None,
+            supplier_product_id=None,
+            confirmed_at=None,
+        )
+        session = _Session(gets={("BuyingGroup", "g6"): group})
+
+        with patch("app.service.group_service._fetch_group_rollups", new=AsyncMock(return_value={"g6": {"current_units": 100, "business_count": 2}})):
+            await _maybe_confirm_group(session, "g6")
+
+        self.assertEqual(group.status, "completed")
+        self.assertEqual(session.commit_count, 0)
+
+    async def test_remaining_units_for_group_terminal_statuses(self):
+        self.assertEqual(
+            _remaining_units_for_group(status="confirmed", current_units=200, max_capacity=500),
+            0,
+        )
+        self.assertEqual(
+            _remaining_units_for_group(status="completed", current_units=200, max_capacity=500),
+            0,
+        )
+        self.assertEqual(
+            _remaining_units_for_group(status="capacity_reached", current_units=200, max_capacity=500),
+            0,
+        )
+
+    async def test_remaining_units_for_group_active_status(self):
+        self.assertEqual(
+            _remaining_units_for_group(status="active", current_units=200, max_capacity=500),
+            300,
+        )

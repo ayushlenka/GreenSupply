@@ -207,6 +207,7 @@ export default function ProductsPage({ auth }) {
         isAuthenticated={auth?.isAuthenticated}
         onLogout={auth?.onLogout}
         accountType={auth?.profile?.account_type}
+        tone="tan"
       />
 
       <main className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-7">

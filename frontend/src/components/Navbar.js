@@ -28,7 +28,7 @@ export default function Navbar({ solid, isAuthenticated, onLogout, showLinks = t
     ? [{ to: '/supplier', label: 'Supplier Dashboard' }]
     : [
         { to: '/groups', label: 'Groups' },
-        { to: '/products', label: 'Orders' },
+        { to: '/orders', label: 'Orders' },
         { to: '/dashboard', label: 'Dashboard' },
       ];
 

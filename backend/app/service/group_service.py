@@ -22,6 +22,7 @@ from app.service.supplier_service import get_reserved_units_by_supplier_product
 from app.service.utils import safe_divide, to_float
 
 settings = get_settings()
+TERMINAL_GROUP_STATUSES = {"confirmed", "completed", "closed", "cancelled"}
 
 
 def _build_group_metrics(
@@ -152,8 +153,10 @@ async def join_group(session: AsyncSession, *, group_id: str, business_id: str, 
         raise ValueError("Business must be assigned to a region before joining groups")
     if group.region_id != business.region_id:
         raise ValueError("Businesses can only join groups in the same region")
-    if group.status == "confirmed":
-        raise ValueError("Group is already confirmed")
+    if group.status in TERMINAL_GROUP_STATUSES:
+        if group.status == "confirmed":
+            raise ValueError("Group is already confirmed")
+        raise ValueError("Group is no longer open for joining")
     existing_commitment = await session.execute(
         select(GroupCommitment.id).where(
             GroupCommitment.group_id == group.id,
@@ -203,8 +206,10 @@ async def supplier_approve_group(session: AsyncSession, *, group_id: str, suppli
         raise ValueError("Group has no assigned supplier")
     if group.supplier_business_id != supplier_business_id:
         raise ValueError("Only the assigned supplier can approve this group")
-    if group.status == "confirmed":
-        raise ValueError("Group is already confirmed")
+    if group.status in TERMINAL_GROUP_STATUSES:
+        if group.status == "confirmed":
+            raise ValueError("Group is already confirmed")
+        raise ValueError("Group is no longer eligible for supplier approval")
 
     await _maybe_confirm_group(session, group_id, allow_supplier_override=True)
 
@@ -220,7 +225,7 @@ async def _maybe_confirm_group(
     allow_supplier_override: bool = False,
 ) -> None:
     group = await session.get(BuyingGroup, group_id)
-    if not group or group.status == "confirmed":
+    if not group or group.status in TERMINAL_GROUP_STATUSES:
         return
 
     rollups = await _fetch_group_rollups(session, [group_id])
@@ -421,6 +426,18 @@ async def _sync_group_capacity_status(
     return max_capacity, supplier_available_units, changed
 
 
+def _remaining_units_for_group(
+    *,
+    status: str,
+    current_units: int,
+    max_capacity: int,
+) -> int:
+    # Remaining units represent how many more units can still be joined.
+    if status in TERMINAL_GROUP_STATUSES or status == "capacity_reached":
+        return 0
+    return max(0, max_capacity - current_units)
+
+
 def _group_base_query() -> Select:
     return (
         select(BuyingGroup, Product, Region)
@@ -479,8 +496,10 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
         if group.supplier_product_id:
             sp = sp_objects.get(group.supplier_product_id)
             if sp:
-                reserved = int(reserved_by_product.get(group.supplier_product_id, 0))
-                supplier_available_units = max(0, int(sp.available_units) - reserved)
+                reserved_total = int(reserved_by_product.get(group.supplier_product_id, 0))
+                own_reserved = current_units if group.status in ("active", "capacity_reached") else 0
+                reserved_excluding_group = max(0, reserved_total - own_reserved)
+                supplier_available_units = max(0, int(sp.available_units) - reserved_excluding_group)
                 max_capacity = min(max_capacity, supplier_available_units)
 
         changed = False
@@ -494,7 +513,11 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
                 changed = True
         if changed:
             has_status_updates = True
-        remaining_units = max(0, max_capacity - current_units)
+        remaining_units = _remaining_units_for_group(
+            status=group.status,
+            current_units=current_units,
+            max_capacity=max_capacity,
+        )
         region = regions_by_group.get(group.id)
         center_lat = round((region.min_lat + region.max_lat) / 2, 6) if region else None
         center_lng = round((region.min_lng + region.max_lng) / 2, 6) if region else None
@@ -568,7 +591,11 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
         .order_by(GroupCommitment.created_at.asc())
     )
     commitments = commitments_result.all()
-    remaining_units = max(0, max_capacity - int(metrics["current_units"]))
+    remaining_units = _remaining_units_for_group(
+        status=group.status,
+        current_units=int(metrics["current_units"]),
+        max_capacity=max_capacity,
+    )
 
     confirmed_order_result = await session.execute(
         select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id == group.id)
