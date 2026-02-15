@@ -124,7 +124,13 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["key_insight"], "Insight")
 
     async def test_group_opportunities_fallback(self):
-        business = SimpleNamespace(id="b1", account_type="business", region_id=2, name="Mission Cafe")
+        business = SimpleNamespace(
+            id="b1",
+            account_type="business",
+            business_type="cafe",
+            region_id=2,
+            name="Mission Cafe",
+        )
         supplier_product = SimpleNamespace(
             id="sp1",
             supplier_business_id="s1",
@@ -141,7 +147,10 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.get = AsyncMock(return_value=business)
         session.execute = AsyncMock()
-        session.execute.return_value = SimpleNamespace(all=lambda: [("s1", "Supplier One")])
+        session.execute.side_effect = [
+            SimpleNamespace(all=lambda: []),  # history rows: (units, status, supplier_product_id, category)
+            SimpleNamespace(all=lambda: [("s1", "Supplier One")]),  # supplier names
+        ]
 
         with patch("app.service.recommendation_service.list_supplier_products", new=AsyncMock(return_value=[supplier_product])), \
              patch("app.service.recommendation_service.get_reserved_units_by_supplier_product", new=AsyncMock(return_value={"sp1": 100})), \
@@ -155,7 +164,13 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["opportunities"][0]["supplier_product_id"], "sp1")
 
     async def test_group_opportunities_gemini(self):
-        business = SimpleNamespace(id="b1", account_type="business", region_id=2, name="Mission Cafe")
+        business = SimpleNamespace(
+            id="b1",
+            account_type="business",
+            business_type="cafe",
+            region_id=2,
+            name="Mission Cafe",
+        )
         supplier_product = SimpleNamespace(
             id="sp1",
             supplier_business_id="s1",
@@ -169,7 +184,10 @@ class TestRecommendationService(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.get = AsyncMock(return_value=business)
         session.execute = AsyncMock()
-        session.execute.return_value = SimpleNamespace(all=lambda: [("s1", "Supplier One")])
+        session.execute.side_effect = [
+            SimpleNamespace(all=lambda: []),  # history rows: (units, status, supplier_product_id, category)
+            SimpleNamespace(all=lambda: [("s1", "Supplier One")]),  # supplier names
+        ]
 
         gemini_payload = {
             "opportunities": [
