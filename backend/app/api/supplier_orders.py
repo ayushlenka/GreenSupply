@@ -14,21 +14,4 @@ async def list_supplier_orders_endpoint(
     supplier_business_id: str | None = Query(default=None),
 ) -> list[SupplierConfirmedOrderRead]:
     rows = await list_supplier_confirmed_orders(db, supplier_business_id=supplier_business_id)
-    return [
-        SupplierConfirmedOrderRead(
-            id=row.id,
-            supplier_business_id=row.supplier_business_id,
-            supplier_product_id=row.supplier_product_id,
-            group_id=row.group_id,
-            total_units=row.total_units,
-            business_count=row.business_count,
-            status=row.status,
-            scheduled_start_at=row.scheduled_start_at,
-            estimated_end_at=row.estimated_end_at,
-            route_total_miles=row.route_total_miles,
-            route_total_minutes=row.route_total_minutes,
-            route_points=row.route_points,
-            created_at=row.created_at,
-        )
-        for row in rows
-    ]
+    return [SupplierConfirmedOrderRead(**row) for row in rows]

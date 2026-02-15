@@ -2,83 +2,119 @@ import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { fetchBusinessByEmail, fetchMe } from './api';
-import { clearStoredToken, getStoredToken, readTokenFromUrlHash } from './auth';
+import { clearStoredToken, getStoredToken, readTokenFromUrlHash, setStoredToken } from './auth';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardPage from './pages/DashboardPage';
+import AuthPage from './pages/AuthPage';
 import GroupsPage from './pages/GroupsPage';
 import HomePage from './pages/HomePage';
 import ProductsPage from './pages/ProductsPage';
 import SupplierPage from './pages/SupplierPage';
 
+function getInitialToken() {
+  const storedToken = getStoredToken();
+  if (storedToken) return storedToken;
+
+  const hashToken = readTokenFromUrlHash();
+  if (hashToken) {
+    setStoredToken(hashToken);
+  }
+  return hashToken;
+}
+
 function App() {
-  const [token, setToken] = useState(() => getStoredToken());
+  const [token, setToken] = useState(getInitialToken);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   useEffect(() => {
-    const hashToken = readTokenFromUrlHash();
-    if (hashToken) {
-      localStorage.setItem('greensupply_access_token', hashToken);
-      setToken(hashToken);
-    }
-  }, []);
+    let cancelled = false;
 
-  useEffect(() => {
     if (!token) {
       setUser(null);
       setProfile(null);
+      setIsAuthLoading(false);
       return;
     }
 
-    fetchMe()
-      .then((res) => setUser(res))
-      .catch(() => {
+    const load = async () => {
+      setIsAuthLoading(true);
+      try {
+        const me = await fetchMe();
+        if (cancelled) return;
+
+        setUser(me);
+
+        if (!me?.email) {
+          setProfile(null);
+          return;
+        }
+
+        try {
+          const business = await fetchBusinessByEmail(me.email);
+          if (!cancelled) setProfile(business);
+        } catch {
+          if (!cancelled) setProfile(null);
+        }
+      } catch {
+        if (cancelled) return;
         clearStoredToken();
         setToken(null);
         setUser(null);
         setProfile(null);
-      });
+      } finally {
+        if (!cancelled) setIsAuthLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   useEffect(() => {
-    if (!user?.email) {
-      setProfile(null);
-      return;
-    }
-
-    fetchBusinessByEmail(user.email)
-      .then((business) => setProfile(business))
-      .catch(() => setProfile(null));
-  }, [user]);
+    const hashToken = readTokenFromUrlHash();
+    if (!hashToken || hashToken === token) return;
+    setStoredToken(hashToken);
+    setToken(hashToken);
+  }, [token]);
 
   const auth = useMemo(
     () => ({
       isAuthenticated: Boolean(token && user),
+      isLoading: isAuthLoading,
       user,
       profile,
-      onProfileCreated: (newProfile) => setProfile(newProfile),
+      onProfileCreated: (newProfile) => {
+        setProfile(newProfile);
+        setIsAuthLoading(false);
+      },
       onLogout: () => {
         clearStoredToken();
         setToken(null);
         setUser(null);
         setProfile(null);
+        setIsAuthLoading(false);
       }
     }),
-    [token, user, profile]
+    [token, user, profile, isAuthLoading]
   );
 
-  const businessAllowed = auth.isAuthenticated && auth.profile?.account_type === 'business';
-  const supplierAllowed = auth.isAuthenticated && auth.profile?.account_type === 'supplier';
+  const businessAllowed = !auth.isLoading && auth.isAuthenticated && auth.profile?.account_type === 'business';
+  const supplierAllowed = !auth.isLoading && auth.isAuthenticated && auth.profile?.account_type === 'supplier';
 
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage auth={auth} />} />
+        <Route path="/auth" element={<AuthPage auth={auth} />} />
 
         <Route
           path="/groups"
           element={
-            <ProtectedRoute isAuthenticated={businessAllowed}>
+            <ProtectedRoute isAuthenticated={businessAllowed} isLoading={auth.isLoading}>
               <GroupsPage auth={auth} />
             </ProtectedRoute>
           }
@@ -86,7 +122,7 @@ function App() {
         <Route
           path="/products"
           element={
-            <ProtectedRoute isAuthenticated={businessAllowed}>
+            <ProtectedRoute isAuthenticated={businessAllowed} isLoading={auth.isLoading}>
               <ProductsPage auth={auth} />
             </ProtectedRoute>
           }
@@ -94,7 +130,7 @@ function App() {
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute isAuthenticated={businessAllowed}>
+            <ProtectedRoute isAuthenticated={businessAllowed} isLoading={auth.isLoading}>
               <DashboardPage auth={auth} />
             </ProtectedRoute>
           }
@@ -102,7 +138,7 @@ function App() {
         <Route
           path="/supplier"
           element={
-            <ProtectedRoute isAuthenticated={supplierAllowed}>
+            <ProtectedRoute isAuthenticated={supplierAllowed} isLoading={auth.isLoading}>
               <SupplierPage auth={auth} />
             </ProtectedRoute>
           }

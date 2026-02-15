@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { createGroup, fetchBusinessById, fetchProducts, fetchSupplierProducts, joinGroup } from '../api';
+import { createGroup, fetchProducts, fetchSupplierProducts, joinGroup } from '../api';
 import Navbar from '../components/Navbar';
 
 export default function ProductsPage({ auth }) {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [supplierProducts, setSupplierProducts] = useState([]);
-  const [supplierNamesById, setSupplierNamesById] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -46,31 +45,6 @@ export default function ProductsPage({ auth }) {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    const supplierIds = [...new Set(supplierProducts.map((item) => item.supplier_business_id).filter(Boolean))];
-    if (supplierIds.length === 0) {
-      setSupplierNamesById({});
-      return;
-    }
-
-    let cancelled = false;
-    Promise.allSettled(supplierIds.map((id) => fetchBusinessById(id))).then((results) => {
-      if (cancelled) return;
-      const map = {};
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          const supplier = result.value;
-          map[supplierIds[index]] = supplier?.name || '';
-        }
-      });
-      setSupplierNamesById(map);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [supplierProducts]);
-
   const selectedSupplierProduct = useMemo(
     () => supplierProducts.find((item) => item.id === form.supplier_product_id) || null,
     [supplierProducts, form.supplier_product_id]
@@ -86,6 +60,16 @@ export default function ProductsPage({ auth }) {
       }
     }
     return options;
+  }, [supplierProducts]);
+
+  const supplierNamesById = useMemo(() => {
+    const map = {};
+    for (const item of supplierProducts) {
+      if (!map[item.supplier_business_id] && item.supplier_business_name) {
+        map[item.supplier_business_id] = item.supplier_business_name;
+      }
+    }
+    return map;
   }, [supplierProducts]);
 
   const supplierProductOptions = useMemo(

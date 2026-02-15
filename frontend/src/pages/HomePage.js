@@ -1,29 +1,7 @@
-import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { createBusiness } from '../api';
 import { getGoogleLoginUrl } from '../auth';
 import Navbar from '../components/Navbar';
-
-const BUSINESS_TYPE_OPTIONS = [
-  'cafe',
-  'restaurant',
-  'bakery',
-  'boba shop',
-  'food truck',
-  'grocery market',
-  'caterer',
-  'campus dining'
-];
-
-const INITIAL_FORM = {
-  name: '',
-  account_type: 'business',
-  business_type: 'cafe',
-  address: '',
-  city: 'San Francisco',
-  state: 'CA',
-  zip: ''
-};
 
 const FEATURE_COLUMNS = [
   {
@@ -59,56 +37,16 @@ const HOW_IT_WORKS = [
 ];
 
 export default function HomePage({ auth }) {
-  const [form, setForm] = useState(INITIAL_FORM);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   const handleGoogleLogin = () => {
     try {
-      window.location.href = getGoogleLoginUrl();
+      window.location.href = getGoogleLoginUrl('/');
     } catch (err) {
       alert('Set REACT_APP_SUPABASE_URL in frontend env to enable Google login.');
     }
   };
-
-  const onChange = (key) => (e) => {
-    const value = e.target.value;
-    setForm((prev) => {
-      const next = { ...prev, [key]: value };
-      if (key === 'account_type') {
-        if (value === 'supplier') {
-          next.business_type = 'supplier';
-        } else if (prev.business_type === 'supplier') {
-          next.business_type = 'cafe';
-          next.city = 'San Francisco';
-          next.state = 'CA';
-        }
-      }
-      return next;
-    });
-  };
-
-  const submitOnboarding = async (e) => {
-    e.preventDefault();
-    if (!auth?.user?.email) return;
-
-    setSubmitting(true);
-    setError('');
-    try {
-      const payload = {
-        ...form,
-        email: auth.user.email,
-      };
-      const business = await createBusiness(payload);
-      auth.onProfileCreated?.(business);
-    } catch (err) {
-      setError(String(err?.message || 'Failed to create account profile'));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const isBusiness = form.account_type === 'business';
+  const goToSetup = () => navigate('/auth');
 
   return (
     <div className="min-h-screen bg-[#ebe7db] text-[#1a1d1f]">
@@ -117,7 +55,7 @@ export default function HomePage({ auth }) {
         auth={auth}
         isAuthenticated={auth?.isAuthenticated}
         onLogout={auth?.onLogout}
-        onGoogleLogin={!auth?.isAuthenticated ? handleGoogleLogin : undefined}
+        onGoogleLogin={!auth?.isAuthenticated && !auth?.isLoading ? handleGoogleLogin : undefined}
         showLinks={Boolean(auth?.profile)}
         accountType={auth?.profile?.account_type}
         tone="tan"
@@ -136,12 +74,19 @@ export default function HomePage({ auth }) {
               and reduce delivery emissions through neighborhood buying groups.
             </p>
 
-            {!auth?.isAuthenticated ? (
+            {!auth?.isAuthenticated && !auth?.isLoading ? (
               <button
                 onClick={handleGoogleLogin}
                 className="mt-9 rounded-full bg-[#2d4a3e] px-8 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-[#ebe7db] transition hover:bg-[#1f6f5c]"
               >
                 Get Started
+              </button>
+            ) : auth?.isAuthenticated && !auth?.profile && !auth?.isLoading ? (
+              <button
+                onClick={goToSetup}
+                className="mt-9 rounded-full bg-[#2d4a3e] px-8 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-[#ebe7db] transition hover:bg-[#1f6f5c]"
+              >
+                Complete Setup
               </button>
             ) : null}
 
@@ -239,102 +184,23 @@ export default function HomePage({ auth }) {
               Start with your business profile, join active groups, and turn routine packaging purchases into
               measurable cost and impact gains.
             </p>
-            {!auth?.isAuthenticated ? (
+            {!auth?.isAuthenticated && !auth?.isLoading ? (
               <button
                 onClick={handleGoogleLogin}
                 className="mt-10 rounded-full border border-white/80 bg-white px-10 py-4 text-sm font-semibold uppercase tracking-[0.08em] text-[#3a5f2d] transition hover:bg-[#f3f9ed]"
               >
                 Get Started
               </button>
+            ) : auth?.isAuthenticated && !auth?.profile && !auth?.isLoading ? (
+              <button
+                onClick={goToSetup}
+                className="mt-10 rounded-full border border-white/80 bg-white px-10 py-4 text-sm font-semibold uppercase tracking-[0.08em] text-[#3a5f2d] transition hover:bg-[#f3f9ed]"
+              >
+                Complete Setup
+              </button>
             ) : null}
           </div>
         </section>
-
-        {auth?.isAuthenticated && !auth?.profile ? (
-          <section className="mx-auto mb-14 mt-2 w-full max-w-3xl rounded-2xl border border-[rgba(107,128,116,0.2)] bg-white p-6 shadow-sm sm:p-8">
-            <h2 className="text-2xl font-semibold text-[#1a1d1f]">Complete Account Setup</h2>
-            <p className="mt-2 text-sm text-[#5b6c63]">
-              Business accounts must be in San Francisco. Supplier accounts can be anywhere in the United States.
-            </p>
-
-            <form className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={submitOnboarding}>
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">Account Type</span>
-                <select
-                  value={form.account_type}
-                  onChange={onChange('account_type')}
-                  className="w-full rounded border border-black/15 bg-white px-3 py-2 text-[#1a1d1f]"
-                >
-                  <option value="business">Business</option>
-                  <option value="supplier">Supplier</option>
-                </select>
-              </label>
-
-              <label>
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">Business Name</span>
-                <input value={form.name} onChange={onChange('name')} className="w-full rounded border border-black/15 px-3 py-2" />
-              </label>
-
-              <label>
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">Business Type</span>
-                {isBusiness ? (
-                  <select
-                    value={form.business_type}
-                    onChange={onChange('business_type')}
-                    className="w-full rounded border border-black/15 bg-white px-3 py-2"
-                  >
-                    {BUSINESS_TYPE_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value="supplier"
-                    disabled
-                    className="w-full rounded border border-black/15 bg-black/5 px-3 py-2 text-ink/65"
-                  />
-                )}
-              </label>
-
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">Street Address</span>
-                <input
-                  value={form.address}
-                  onChange={onChange('address')}
-                  placeholder={isBusiness ? 'SF street address' : 'US street address'}
-                  className="w-full rounded border border-black/15 px-3 py-2"
-                />
-              </label>
-
-              <label>
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">City</span>
-                <input value={form.city} onChange={onChange('city')} className="w-full rounded border border-black/15 px-3 py-2" />
-              </label>
-
-              <label>
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">State</span>
-                <input value={form.state} onChange={onChange('state')} className="w-full rounded border border-black/15 px-3 py-2" />
-              </label>
-
-              <label className="sm:col-span-2">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.08em] text-[#5b6c63]">ZIP</span>
-                <input value={form.zip} onChange={onChange('zip')} className="w-full rounded border border-black/15 px-3 py-2" />
-              </label>
-
-              {error ? <p className="sm:col-span-2 text-sm text-red-600">{error}</p> : null}
-
-              <button
-                  type="submit"
-                  disabled={submitting}
-                className="sm:col-span-2 rounded bg-[#2d4a3e] px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-[#1f6f5c] disabled:opacity-60"
-              >
-                {submitting ? 'Saving...' : 'Create Account Profile'}
-              </button>
-            </form>
-          </section>
-        ) : null}
 
       </main>
     </div>

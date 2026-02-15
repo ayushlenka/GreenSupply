@@ -139,6 +139,7 @@ class SupplierProductCreate(BaseModel):
 class SupplierProductRead(BaseModel):
     id: str
     supplier_business_id: str
+    supplier_business_name: str | None = None
     name: str
     category: str
     material: str
@@ -163,4 +164,6 @@ class SupplierConfirmedOrderRead(BaseModel):
     route_total_miles: float | None = None
     route_total_minutes: float | None = None
     route_points: list[list[float]] | None = None
+    group_display_name: str | None = None
+    product_name: str | None = None
     created_at: datetime

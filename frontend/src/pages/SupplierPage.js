@@ -206,8 +206,11 @@ export default function SupplierPage({ auth }) {
               <ul className="mt-4 space-y-2 text-sm">
                 {orders.map((o) => (
                   <li key={o.id} className="rounded border border-black/10 p-3">
-                    <p className="font-medium">Group {o.group_id}</p>
-                    <p className="text-ink/70">Units: {o.total_units} | Businesses: {o.business_count}</p>
+                    <p className="font-medium">{o.group_display_name || `Order ${o.group_id.slice(0, 8)}`}</p>
+                    <p className="text-ink/70">
+                      {o.product_name ? `Product: ${o.product_name} | ` : ''}
+                      Units: {o.total_units} | Businesses: {o.business_count}
+                    </p>
                   </li>
                 ))}
               </ul>

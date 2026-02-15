@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.business import Business
 from app.db.session import get_db_session
 from app.schemas.domain import SupplierProductCreate, SupplierProductRead
 from app.service.supplier_service import (
@@ -35,6 +37,7 @@ async def create_supplier_product_endpoint(
     return SupplierProductRead(
         id=item.id,
         supplier_business_id=item.supplier_business_id,
+        supplier_business_name=None,
         name=item.name,
         category=item.category,
         material=item.material,
@@ -54,10 +57,17 @@ async def list_supplier_products_endpoint(
 ) -> list[SupplierProductRead]:
     items = await list_supplier_products(db, supplier_business_id=supplier_business_id)
     reserved_by_product = await get_reserved_units_by_supplier_product(db, [item.id for item in items])
+    supplier_ids = sorted({item.supplier_business_id for item in items if item.supplier_business_id})
+    supplier_names_by_id: dict[str, str | None] = {}
+    if supplier_ids:
+        supplier_result = await db.execute(select(Business.id, Business.name).where(Business.id.in_(supplier_ids)))
+        supplier_names_by_id = {str(sid): name for sid, name in supplier_result.all()}
+
     return [
         SupplierProductRead(
             id=item.id,
             supplier_business_id=item.supplier_business_id,
+            supplier_business_name=supplier_names_by_id.get(item.supplier_business_id),
             name=item.name,
             category=item.category,
             material=item.material,

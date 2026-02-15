@@ -12,13 +12,13 @@ export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-export function getGoogleLoginUrl() {
+export function getGoogleLoginUrl(redirectPath = '/auth') {
   const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
   if (!supabaseUrl) {
     throw new Error('Missing REACT_APP_SUPABASE_URL');
   }
 
-  const redirectTo = window.location.origin;
+  const redirectTo = `${window.location.origin}${redirectPath}`;
   return `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
