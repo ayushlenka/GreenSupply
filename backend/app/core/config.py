@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     db_connect_timeout_seconds: int = 10
     db_ssl_verify: bool = True
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.0-flash-lite"
     google_maps_api_key: str = ""
     group_default_min_businesses_required: int = 5
     smtp_host: str = ""

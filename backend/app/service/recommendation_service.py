@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -11,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.models.business import Business
+from app.db.models.buying_group import BuyingGroup
+from app.db.models.group_commitment import GroupCommitment
+from app.db.models.product import Product
 from app.service.group_service import get_group_details, get_group_impact, list_active_groups
 from app.service.supplier_service import get_reserved_units_by_supplier_product, list_supplier_products
 
@@ -22,9 +26,19 @@ def _extract_json_object(text: str) -> dict[str, object] | None:
     if not text:
         return None
 
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n?```\s*$", "", text, flags=re.MULTILINE)
+    text = text.strip()
+
     try:
         parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
+        if isinstance(parsed, dict):
+            return parsed
+        # If Gemini returns a bare array, wrap it as {"opportunities": [...]}
+        if isinstance(parsed, list):
+            return {"opportunities": parsed}
+        return None
     except json.JSONDecodeError:
         pass
 
@@ -179,8 +193,8 @@ async def _call_gemini_object(prompt: str) -> dict[str, object] | None:
 
     models_to_try = [
         settings.gemini_model,
+        "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
-        "gemini-flash-latest",
     ]
     seen_models: set[str] = set()
 
@@ -195,7 +209,7 @@ async def _call_gemini_object(prompt: str) -> dict[str, object] | None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(request, timeout=25.0) as response:
+        with urlopen(request, timeout=40.0) as response:
             data = json.loads(response.read().decode("utf-8"))
 
         candidates = data.get("candidates") or []
@@ -208,7 +222,7 @@ async def _call_gemini_object(prompt: str) -> dict[str, object] | None:
 
         parsed = _extract_json_object(text)
         if not parsed:
-            logger.warning("Gemini output was not parseable JSON")
+            logger.warning("Gemini output was not parseable JSON: %.500s", text)
             return None
         return parsed
 
@@ -216,21 +230,31 @@ async def _call_gemini_object(prompt: str) -> dict[str, object] | None:
         if not model or model in seen_models:
             continue
         seen_models.add(model)
-        try:
-            result = await asyncio.to_thread(_request_with_model, model)
-            if result:
-                return result
-        except HTTPError as exc:
-            body = ""
+        for attempt in range(2):
             try:
-                body = exc.read().decode("utf-8", errors="ignore")
-            except Exception:
+                result = await asyncio.to_thread(_request_with_model, model)
+                if result:
+                    return result
+                break  # Got response but not parseable, skip retries for this model
+            except HTTPError as exc:
                 body = ""
-            logger.warning("Gemini HTTP error model=%s status=%s body=%s", model, exc.code, body[:800])
-            continue
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            logger.warning("Gemini request failed model=%s error=%s", model, exc)
-            continue
+                try:
+                    body = exc.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    body = ""
+                logger.warning("Gemini HTTP error model=%s status=%s attempt=%s body=%s", model, exc.code, attempt, body[:800])
+                if exc.code == 429 and attempt == 0:
+                    # Extract retry delay from error message, default 10s
+                    import re as _re
+                    match = _re.search(r"retry in ([\d.]+)s", body)
+                    wait = min(float(match.group(1)), 15.0) if match else 10.0
+                    logger.info("Rate limited on %s, waiting %.1fs before retry", model, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                break
+            except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+                logger.warning("Gemini request failed model=%s error=%s", model, exc)
+                break
     return None
 
 
@@ -285,11 +309,26 @@ def _format_opportunity_fallback(
 def _build_group_opportunities_prompt(
     *,
     business_name: str | None,
+    business_type: str | None,
     region_id: int | None,
     constraints: str | None,
     candidates: list[dict[str, object]],
     max_results: int,
+    business_history: dict[str, object] | None = None,
 ) -> str:
+    history_text = "No prior order history."
+    if business_history:
+        past_categories = business_history.get("past_categories", [])
+        total_units = business_history.get("total_units_committed", 0)
+        groups_joined = business_history.get("groups_joined", 0)
+        active_group_product_ids = business_history.get("active_group_product_ids", [])
+        history_text = (
+            f"Past categories ordered: {', '.join(past_categories) if past_categories else 'none'}. "
+            f"Total units committed historically: {total_units}. "
+            f"Groups joined: {groups_joined}. "
+            f"Currently active in supplier product IDs: {', '.join(active_group_product_ids) if active_group_product_ids else 'none'}."
+        )
+
     return (
         "You are an operations copilot for a cooperative procurement platform.\n"
         "Return valid JSON with key opportunities (array).\n"
@@ -299,9 +338,13 @@ def _build_group_opportunities_prompt(
         "recommended_initial_commitment_units, outreach_copy, reasoning, evidence_used, risk_note.\n"
         "Use only supplier_product_ids that exist in provided candidates.\n"
         "Do not invent supplier IDs or products.\n"
+        "Tailor recommendations to the business's type and order history.\n"
+        "Prioritize categories the business has ordered before, and avoid products they are already active in.\n"
         f"Return at most {max_results} opportunities.\n\n"
         f"Business name: {business_name or 'Unknown business'}\n"
+        f"Business type: {business_type or 'unknown'}\n"
         f"Region id: {region_id}\n"
+        f"Order history: {history_text}\n"
         f"Constraints: {constraints or 'None provided'}\n"
         f"Candidates JSON: {json.dumps(candidates)}\n"
     )
@@ -470,6 +513,39 @@ async def build_group_opportunities_recommendation(
     if business.region_id is None:
         raise ValueError("Business must be assigned to a region")
 
+    # Fetch business-specific order history for personalized recommendations
+    history_result = await session.execute(
+        select(
+            GroupCommitment.units,
+            BuyingGroup.status,
+            BuyingGroup.supplier_product_id,
+            Product.category,
+        )
+        .join(BuyingGroup, BuyingGroup.id == GroupCommitment.group_id)
+        .join(Product, Product.id == BuyingGroup.product_id)
+        .where(GroupCommitment.business_id == business_id)
+    )
+    history_rows = history_result.all()
+    past_categories: list[str] = []
+    seen_cats: set[str] = set()
+    total_units_committed = 0
+    active_group_sp_ids: list[str] = []
+    for units, status, sp_id, category in history_rows:
+        total_units_committed += int(units or 0)
+        cat = str(category or "").strip().lower()
+        if cat and cat not in seen_cats:
+            seen_cats.add(cat)
+            past_categories.append(cat)
+        if status in ("active", "capacity_reached") and sp_id:
+            active_group_sp_ids.append(str(sp_id))
+
+    business_history = {
+        "past_categories": past_categories,
+        "total_units_committed": total_units_committed,
+        "groups_joined": len(history_rows),
+        "active_group_product_ids": sorted(set(active_group_sp_ids)),
+    }
+
     supplier_products = await list_supplier_products(session)
     if not supplier_products:
         return {"source": "fallback", "region_id": business.region_id, "opportunities": []}
@@ -524,6 +600,15 @@ async def build_group_opportunities_recommendation(
     if not fallback_candidates:
         return {"source": "fallback", "region_id": business.region_id, "opportunities": []}
 
+    # Boost candidates matching the business's past categories
+    for candidate in fallback_candidates:
+        cat = str(candidate.get("category", "")).strip().lower()
+        if cat in seen_cats:
+            candidate["_rank_score"] = int(candidate.get("_rank_score", 0)) + 500
+        # Penalize products the business is already active in
+        if candidate.get("supplier_product_id") in active_group_sp_ids:
+            candidate["_rank_score"] = int(candidate.get("_rank_score", 0)) - 1000
+
     fallback_candidates.sort(key=lambda c: int(c.get("_rank_score", 0)), reverse=True)
     fallback_trimmed = fallback_candidates[: max_results]
     fallback_for_prompt = [
@@ -534,10 +619,12 @@ async def build_group_opportunities_recommendation(
 
     prompt = _build_group_opportunities_prompt(
         business_name=business.name,
+        business_type=business.business_type,
         region_id=business.region_id,
         constraints=constraints,
         candidates=fallback_for_prompt,
         max_results=max_results,
+        business_history=business_history,
     )
     gemini_raw = await _call_gemini_object(prompt)
     if gemini_raw:
