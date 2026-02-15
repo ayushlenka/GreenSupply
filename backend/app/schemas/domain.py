@@ -94,6 +94,8 @@ class GroupRead(BaseModel):
     supplier_available_units: int | None = None
     min_businesses_required: int | None = None
     confirmed_at: datetime | None = None
+    scheduled_start_at: datetime | None = None
+    estimated_end_at: datetime | None = None
     deadline: datetime | None = None
     target_units: int
     remaining_units: int | None = None
@@ -166,4 +168,26 @@ class SupplierConfirmedOrderRead(BaseModel):
     route_points: list[list[float]] | None = None
     group_display_name: str | None = None
     product_name: str | None = None
+    created_at: datetime
+
+
+class BusinessOrderParticipantRead(BaseModel):
+    business_id: str
+    business_name: str | None = None
+    business_address: str | None = None
+    units: int
+
+
+class BusinessOrderRead(BaseModel):
+    id: str
+    group_id: str
+    group_display_name: str
+    product_name: str | None = None
+    status: str
+    scheduled_start_at: datetime | None = None
+    estimated_end_at: datetime | None = None
+    total_units: int
+    business_count: int
+    your_units: int
+    participants: list[BusinessOrderParticipantRead]
     created_at: datetime

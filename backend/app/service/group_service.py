@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -348,6 +348,34 @@ async def _fetch_group_rollups(session: AsyncSession, group_ids: list[str]) -> d
     return rollups
 
 
+async def _complete_finished_orders(session: AsyncSession) -> None:
+    now_utc = datetime.now(UTC)
+    result = await session.execute(
+        select(SupplierConfirmedOrder, BuyingGroup)
+        .join(BuyingGroup, BuyingGroup.id == SupplierConfirmedOrder.group_id)
+        .where(
+            SupplierConfirmedOrder.status == "confirmed",
+            SupplierConfirmedOrder.estimated_end_at.is_not(None),
+            SupplierConfirmedOrder.estimated_end_at <= now_utc,
+        )
+    )
+    rows = result.all()
+    if not rows:
+        return
+
+    changed = False
+    for order, group in rows:
+        if order.status != "completed":
+            order.status = "completed"
+            changed = True
+        if group.status == "confirmed":
+            group.status = "completed"
+            changed = True
+
+    if changed:
+        await session.commit()
+
+
 async def _compute_group_capacity(
     session: AsyncSession,
     group: BuyingGroup,
@@ -403,6 +431,7 @@ def _group_base_query() -> Select:
 
 
 async def list_active_groups(session: AsyncSession, region_id: int | None = None) -> list[dict[str, object]]:
+    await _complete_finished_orders(session)
     stmt = _group_base_query().where(BuyingGroup.status.in_(["active", "capacity_reached", "confirmed"]))
     if region_id is not None:
         stmt = stmt.where(BuyingGroup.region_id == region_id)
@@ -429,6 +458,12 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
     if sp_ids:
         sp_result = await session.execute(select(SupplierProduct).where(SupplierProduct.id.in_(sp_ids)))
         sp_objects = {sp.id: sp for sp in sp_result.scalars().all()}
+    confirmed_orders_map: dict[str, SupplierConfirmedOrder] = {}
+    if group_ids:
+        confirmed_orders_result = await session.execute(
+            select(SupplierConfirmedOrder).where(SupplierConfirmedOrder.group_id.in_(group_ids))
+        )
+        confirmed_orders_map = {order.group_id: order for order in confirmed_orders_result.scalars().all()}
 
     payload: list[dict[str, object]] = []
     has_status_updates = False
@@ -477,6 +512,12 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
                 "supplier_available_units": supplier_available_units,
                 "min_businesses_required": group.min_businesses_required,
                 "confirmed_at": group.confirmed_at,
+                "scheduled_start_at": confirmed_orders_map.get(group.id).scheduled_start_at
+                if confirmed_orders_map.get(group.id)
+                else None,
+                "estimated_end_at": confirmed_orders_map.get(group.id).estimated_end_at
+                if confirmed_orders_map.get(group.id)
+                else None,
                 "deadline": group.deadline,
                 "target_units": group.target_units,
                 "remaining_units": remaining_units,
@@ -499,6 +540,7 @@ async def list_active_groups(session: AsyncSession, region_id: int | None = None
 
 
 async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, object] | None:
+    await _complete_finished_orders(session)
     result = await session.execute(_group_base_query().where(BuyingGroup.id == group_id))
     row = result.first()
     if not row:
@@ -542,6 +584,8 @@ async def get_group_details(session: AsyncSession, group_id: str) -> dict[str, o
         "supplier_available_units": supplier_available_units,
         "min_businesses_required": group.min_businesses_required,
         "confirmed_at": group.confirmed_at,
+        "scheduled_start_at": confirmed_order.scheduled_start_at if confirmed_order is not None else None,
+        "estimated_end_at": confirmed_order.estimated_end_at if confirmed_order is not None else None,
         "deadline": group.deadline,
         "target_units": group.target_units,
         "remaining_units": remaining_units,

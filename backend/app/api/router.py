@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.auth import router as auth_router
+from app.api.business_orders import router as business_orders_router
 from app.api.businesses import router as businesses_router
 from app.api.groups import router as groups_router
 from app.api.health import router as health_router
@@ -15,6 +16,7 @@ api_router = APIRouter()
 api_router.include_router(health_router, tags=["health"])
 api_router.include_router(auth_router, tags=["auth"])
 api_router.include_router(businesses_router, tags=["businesses"])
+api_router.include_router(business_orders_router, tags=["business-orders"])
 api_router.include_router(products_router, tags=["products"])
 api_router.include_router(regions_router, tags=["regions"])
 api_router.include_router(groups_router, tags=["groups"])

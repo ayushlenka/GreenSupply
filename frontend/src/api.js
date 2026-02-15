@@ -116,3 +116,8 @@ export function fetchSupplierOrders(supplierBusinessId) {
   const query = new URLSearchParams({ supplier_business_id: supplierBusinessId });
   return request(`/supplier-orders?${query.toString()}`);
 }
+
+export function fetchBusinessOrders(businessId) {
+  const query = new URLSearchParams({ business_id: businessId });
+  return request(`/business-orders?${query.toString()}`);
+}

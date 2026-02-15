@@ -12,19 +12,6 @@ mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN;
 const DEFAULT_CENTER = { lng: -122.4013, lat: 37.7751 };
 const HALF_SIDE_MILES = 1;
 const MILES_PER_LAT_DEGREE = 69;
-const ROUTE_SOURCE_ID = 'delivery-route-source';
-const ROUTE_LAYER_ID = 'delivery-route-layer';
-const ROUTE_GLOW_LAYER_ID = 'delivery-route-glow';
-
-function haversineDistance(lat1, lng1, lat2, lng2) {
-  const R = 3958.8; // Earth radius in miles
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 function twoMileBounds(centerLng, centerLat) {
   const latDelta = HALF_SIDE_MILES / MILES_PER_LAT_DEGREE;
@@ -41,14 +28,12 @@ export default function GroupsPage({ auth }) {
   const [regionsById, setRegionsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
-  const [filter, setFilter] = useState('all');
-  const [sort, setSort] = useState('nearest');
+  const [statusFilter, setStatusFilter] = useState('in_progress');
   const [modalGroup, setModalGroup] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '' });
   const [mapReady, setMapReady] = useState(false);
   const [activeGroupDetail, setActiveGroupDetail] = useState(null);
   const [supplierBusiness, setSupplierBusiness] = useState(null);
-  const [routeClock, setRouteClock] = useState(Date.now());
 
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
@@ -56,7 +41,6 @@ export default function GroupsPage({ auth }) {
   const cardRefs = useRef({});
   const participantMarkersRef = useRef([]);
   const supplierMarkerRef = useRef(null);
-  const truckMarkerRef = useRef(null);
 
   useEffect(() => {
     if (!Number.isFinite(regionId)) {
@@ -98,17 +82,6 @@ export default function GroupsPage({ auth }) {
 
   const activeGroup = groups.find((group) => group.id === activeId) || null;
   const commitments = useMemo(() => activeGroupDetail?.commitments || [], [activeGroupDetail]);
-  const confirmedOrder = activeGroupDetail?.confirmed_order || null;
-
-  const routeProgress = useMemo(() => {
-    if (!confirmedOrder?.scheduled_start_at || !confirmedOrder?.estimated_end_at) return 0;
-    const startMs = new Date(confirmedOrder.scheduled_start_at).getTime();
-    const endMs = new Date(confirmedOrder.estimated_end_at).getTime();
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
-    if (routeClock <= startMs) return 0;
-    if (routeClock >= endMs) return 1;
-    return (routeClock - startMs) / (endMs - startMs);
-  }, [confirmedOrder, routeClock]);
 
   const applyBoundsForGroup = useCallback(
     (group) => {
@@ -236,11 +209,6 @@ export default function GroupsPage({ auth }) {
   }, [activeId, groups]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setRouteClock(Date.now()), 30000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
     if (!activeId) return;
     const cardEl = cardRefs.current[activeId];
     if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -274,44 +242,17 @@ export default function GroupsPage({ auth }) {
     }
   };
 
-  const userLat = Number(auth?.profile?.latitude);
-  const userLng = Number(auth?.profile?.longitude);
-  const hasUserLocation = Number.isFinite(userLat) && Number.isFinite(userLng);
-
-  const categories = [...new Set(groups.map((g) => (g.product?.category || '').toLowerCase()))].filter(Boolean);
-
-  const sortedGroups = useMemo(() => {
-    const filtered = filter === 'all' ? [...groups] : groups.filter((g) => (g.product?.category || '').toLowerCase() === filter);
-
-    if (sort === 'nearest' && hasUserLocation) {
-      filtered.sort((a, b) => {
-        const aLat = Number(a.group_center_latitude);
-        const aLng = Number(a.group_center_longitude);
-        const bLat = Number(b.group_center_latitude);
-        const bLng = Number(b.group_center_longitude);
-        const aHas = Number.isFinite(aLat) && Number.isFinite(aLng);
-        const bHas = Number.isFinite(bLat) && Number.isFinite(bLng);
-        if (!aHas && !bHas) return 0;
-        if (!aHas) return 1;
-        if (!bHas) return -1;
-        const distA = haversineDistance(userLat, userLng, aLat, aLng);
-        const distB = haversineDistance(userLat, userLng, bLat, bLng);
-        return distA - distB;
-      });
-    } else if (sort === 'deadline') {
-      filtered.sort((a, b) => {
-        const aTime = a.deadline ? new Date(a.deadline).getTime() : Infinity;
-        const bTime = b.deadline ? new Date(b.deadline).getTime() : Infinity;
-        return aTime - bTime;
-      });
-    } else if (sort === 'progress') {
-      filtered.sort((a, b) => (b.progress_pct || 0) - (a.progress_pct || 0));
+  const filteredGroups = useMemo(() => {
+    const currentBusinessId = auth?.profile?.id;
+    if (statusFilter === 'confirmed') {
+      return groups.filter((g) => g.status === 'confirmed');
     }
-
-    return filtered;
-  }, [groups, filter, sort, hasUserLocation, userLat, userLng]);
-
-  const filteredGroups = sortedGroups;
+    return groups.filter(
+      (g) =>
+        g.status === 'active' ||
+        ((g.status === 'capacity_reached' || g.status === 'pending') && g.created_by_business_id === currentBusinessId)
+    );
+  }, [groups, statusFilter, auth?.profile?.id]);
 
   const totalBusinesses = groups.reduce((s, g) => s + (g.business_count || 0), 0);
   const totalSavings = groups.reduce((s, g) => s + (g.estimated_savings_usd || 0), 0);
@@ -327,11 +268,6 @@ export default function GroupsPage({ auth }) {
       supplierMarkerRef.current.remove();
       supplierMarkerRef.current = null;
     }
-    if (truckMarkerRef.current) {
-      truckMarkerRef.current.remove();
-      truckMarkerRef.current = null;
-    }
-
     const participants = commitments
       .map((c) => ({
         ...c,
@@ -421,89 +357,33 @@ export default function GroupsPage({ auth }) {
         (b, point) => b.extend(point),
         new mapboxgl.LngLatBounds(allPoints[0], allPoints[0])
       );
-      map.fitBounds(bounds, { padding: 70, duration: 600, maxZoom: 14.5 });
-    }
-
-    const rawRoute = confirmedOrder?.route_points || [];
-    const routePoints = rawRoute
-      .map((pt) => (Array.isArray(pt) && pt.length === 2 ? [Number(pt[0]), Number(pt[1])] : null))
-      .filter((pt) => pt && Number.isFinite(pt[0]) && Number.isFinite(pt[1]));
-
-    const clearRoute = () => {
-      if (map.getLayer(ROUTE_GLOW_LAYER_ID)) map.removeLayer(ROUTE_GLOW_LAYER_ID);
-      if (map.getLayer(ROUTE_LAYER_ID)) map.removeLayer(ROUTE_LAYER_ID);
-      if (map.getSource(ROUTE_SOURCE_ID)) map.removeSource(ROUTE_SOURCE_ID);
-    };
-
-    if (routePoints.length < 2 || activeGroupDetail?.status !== 'confirmed') {
-      clearRoute();
-      return;
-    }
-
-    const consumedIndex = Math.floor(routeProgress * (routePoints.length - 1));
-    const remainingRoute =
-      consumedIndex >= routePoints.length - 1
-        ? routePoints.slice(routePoints.length - 2)
-        : routePoints.slice(Math.max(0, consumedIndex));
-    const activeTruckPoint = routePoints[Math.min(consumedIndex, routePoints.length - 1)];
-
-    const sourcePayload = {
-      type: 'Feature',
-      geometry: {
-        type: 'LineString',
-        coordinates: remainingRoute,
-      },
-      properties: {},
-    };
-
-    if (map.getSource(ROUTE_SOURCE_ID)) {
-      map.getSource(ROUTE_SOURCE_ID).setData(sourcePayload);
+      const desktopPanelPadding = window.innerWidth >= 1024 ? 460 : 70;
+      map.fitBounds(bounds, {
+        padding: { top: 70, bottom: 70, left: 70, right: desktopPanelPadding },
+        duration: 600,
+        maxZoom: 14.5,
+      });
     } else {
-      map.addSource(ROUTE_SOURCE_ID, {
-        type: 'geojson',
-        data: sourcePayload,
-      });
-      map.addLayer({
-        id: ROUTE_GLOW_LAYER_ID,
-        type: 'line',
-        source: ROUTE_SOURCE_ID,
-        paint: {
-          'line-color': '#7ef2c5',
-          'line-width': 9,
-          'line-opacity': 0.28,
-        },
-      });
-      map.addLayer({
-        id: ROUTE_LAYER_ID,
-        type: 'line',
-        source: ROUTE_SOURCE_ID,
-        paint: {
-          'line-color': '#2ad58b',
-          'line-width': 4.5,
-          'line-opacity': 0.95,
-        },
-      });
+      applyBoundsForGroup(activeGroup);
     }
-
-    const truckEl = document.createElement('div');
-    truckEl.className = 'truck-dot';
-    truckEl.title = 'Delivery in progress';
-
-    truckMarkerRef.current = new mapboxgl.Marker({ element: truckEl, anchor: 'center' })
-      .setLngLat(activeTruckPoint)
-      .addTo(map);
-  }, [mapReady, commitments, supplierBusiness, confirmedOrder, routeProgress, activeGroupDetail?.status]);
+  }, [mapReady, commitments, supplierBusiness, applyBoundsForGroup, activeGroup]);
 
   return (
-    <div className="min-h-screen overflow-hidden bg-ink">
-      <Navbar solid isAuthenticated={auth?.isAuthenticated} onLogout={auth?.onLogout} accountType={auth?.profile?.account_type} />
+    <div className="h-[100dvh] min-h-0 overflow-hidden bg-cream pt-16">
+      <Navbar
+        solid
+        isAuthenticated={auth?.isAuthenticated}
+        onLogout={auth?.onLogout}
+        accountType={auth?.profile?.account_type}
+        tone="tan"
+      />
 
-      <div className="relative h-[calc(100vh-4rem)]">
-        <div className="h-[42%] lg:absolute lg:inset-0 lg:h-auto">
+      <div className="relative h-full bg-cream xl:overflow-hidden">
+        <div className="h-[42%] md:h-[50%] xl:absolute xl:inset-0 xl:h-full">
           <div ref={mapContainer} className="h-full w-full" />
         </div>
 
-        <aside className="relative z-30 ml-auto flex h-[58%] w-full max-w-xl flex-col bg-cream shadow-2xl lg:h-full">
+        <aside className="relative z-30 flex h-[58%] w-full flex-col rounded-t-2xl bg-cream shadow-2xl md:mx-auto md:h-[50%] md:max-w-3xl xl:ml-auto xl:mr-0 xl:h-full xl:max-w-xl xl:rounded-none">
           <div className="border-b border-black/10 px-5 pb-5 pt-5 sm:px-7">
           <p className="text-xs uppercase tracking-[0.12em] text-sage">San Francisco - {groups.length} active groups</p>
           <h1 className="mt-2 text-3xl font-semibold text-ink">Buying Groups</h1>
@@ -523,47 +403,22 @@ export default function GroupsPage({ auth }) {
           <div className="border-b border-black/10 px-5 py-3 sm:px-7">
           <div className="flex flex-wrap gap-2">
             <button
-              className={`rounded-full border px-3 py-1 text-xs ${filter === 'all' ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'}`}
-              onClick={() => setFilter('all')}
+              className={`rounded-full border px-3 py-1 text-xs ${
+                statusFilter === 'in_progress' ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'
+              }`}
+              onClick={() => setStatusFilter('in_progress')}
             >
-              All
+              In Progress
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                className={`rounded-full border px-3 py-1 text-xs capitalize ${
-                  filter === cat ? 'border-moss bg-moss text-parchment' : 'border-black/20 text-ink/70'
-                }`}
-                onClick={() => setFilter(cat)}
-              >
-                {cat}
-              </button>
-            ))}
+            <button
+              className={`rounded-full border px-3 py-1 text-xs ${
+                statusFilter === 'confirmed' ? 'border-ink bg-ink text-parchment' : 'border-black/20 text-ink/70'
+              }`}
+              onClick={() => setStatusFilter('confirmed')}
+            >
+              Confirmed
+            </button>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className="text-[10px] uppercase tracking-wider text-ink/40 self-center mr-1">Sort</span>
-            {[
-              { key: 'nearest', label: 'Nearest' },
-              { key: 'deadline', label: 'Deadline' },
-              { key: 'progress', label: 'Progress' },
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                className={`rounded-full border px-3 py-1 text-xs ${
-                  sort === key ? 'border-ink bg-ink text-parchment' : 'border-black/20 text-ink/70'
-                }`}
-                onClick={() => setSort(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {activeGroupDetail?.status === 'confirmed' && confirmedOrder ? (
-            <p className="mt-3 text-xs text-ink/65">
-              Delivery scheduled: {confirmedOrder.scheduled_start_at ? new Date(confirmedOrder.scheduled_start_at).toLocaleString() : 'TBD'}
-              {confirmedOrder.route_total_minutes ? ` | ETA ${Math.round(confirmedOrder.route_total_minutes)} min` : ''}
-            </p>
-          ) : null}
         </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
@@ -571,7 +426,7 @@ export default function GroupsPage({ auth }) {
             <div className="py-10 text-center text-sm text-ink/60">Loading groups...</div>
           ) : filteredGroups.length === 0 ? (
             <div className="py-10 text-center text-sm text-ink/60">
-              {groups.length === 0 ? 'No active groups. Make sure backend is running.' : 'No groups in this category.'}
+              {groups.length === 0 ? 'No active groups. Make sure backend is running.' : 'No groups in this status.'}
             </div>
           ) : (
             <div className="space-y-3">

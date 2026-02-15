@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,6 +7,23 @@ from app.db.models.buying_group import BuyingGroup
 from app.db.models.product import Product
 from app.db.models.supplier_confirmed_order import SupplierConfirmedOrder
 from app.db.models.supplier_product import SupplierProduct
+
+
+async def reconcile_completed_orders(
+    session: AsyncSession,
+    rows: list[tuple[SupplierConfirmedOrder, BuyingGroup | None, Product | None, SupplierProduct | None]],
+) -> None:
+    now_utc = datetime.now(UTC)
+    changed = False
+    for order, group, _, _ in rows:
+        if order.status == "confirmed" and order.estimated_end_at is not None and order.estimated_end_at <= now_utc:
+            order.status = "completed"
+            changed = True
+            if group is not None and group.status == "confirmed":
+                group.status = "completed"
+                changed = True
+    if changed:
+        await session.commit()
 
 
 async def list_supplier_confirmed_orders(
@@ -20,9 +39,11 @@ async def list_supplier_confirmed_orders(
     if supplier_business_id:
         stmt = stmt.where(SupplierConfirmedOrder.supplier_business_id == supplier_business_id)
     result = await session.execute(stmt)
+    rows = result.all()
+    await reconcile_completed_orders(session, rows)
 
     payload: list[dict[str, object]] = []
-    for order, group, product, supplier_product in result.all():
+    for order, group, product, supplier_product in rows:
         product_name = None
         if supplier_product is not None:
             product_name = supplier_product.name

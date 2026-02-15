@@ -97,16 +97,18 @@ def _decode_polyline(encoded: str) -> list[list[float]]:
     return points
 
 
-def _fetch_directions(
-    ordered_route: list[tuple[float, float]],
+def _fetch_directions_request(
+    *,
+    origin_point: tuple[float, float],
+    destination_point: tuple[float, float],
+    waypoint_points: list[tuple[float, float]],
 ) -> tuple[list[list[float]] | None, float | None, float | None]:
     settings = get_settings()
-    if not settings.google_maps_api_key or len(ordered_route) < 2:
+    if not settings.google_maps_api_key:
         return None, None, None
 
-    origin = f"{ordered_route[0][0]},{ordered_route[0][1]}"
-    destination = f"{ordered_route[-1][0]},{ordered_route[-1][1]}"
-    waypoints = ordered_route[1:-1]
+    origin = f"{origin_point[0]},{origin_point[1]}"
+    destination = f"{destination_point[0]},{destination_point[1]}"
 
     params = {
         "origin": origin,
@@ -114,8 +116,8 @@ def _fetch_directions(
         "mode": "driving",
         "key": settings.google_maps_api_key,
     }
-    if waypoints:
-        params["waypoints"] = "|".join(f"{lat},{lng}" for lat, lng in waypoints)
+    if waypoint_points:
+        params["waypoints"] = "optimize:true|" + "|".join(f"{lat},{lng}" for lat, lng in waypoint_points)
 
     url = f"https://maps.googleapis.com/maps/api/directions/json?{urlencode(params)}"
     try:
@@ -139,21 +141,63 @@ def _fetch_directions(
     return _decode_polyline(polyline), total_meters / 1609.344, total_seconds / 60.0
 
 
+def _fetch_optimized_directions(
+    supplier_point: tuple[float, float],
+    destination_points: list[tuple[float, float]],
+) -> tuple[list[list[float]] | None, float | None, float | None]:
+    settings = get_settings()
+    if not settings.google_maps_api_key or len(destination_points) == 0:
+        return None, None, None
+
+    # For a single stop, this is just one direct driving route.
+    if len(destination_points) == 1:
+        return _fetch_directions_request(
+            origin_point=supplier_point,
+            destination_point=destination_points[0],
+            waypoint_points=[],
+        )
+
+    # Try each stop as the final destination and let Google optimize intermediate waypoints.
+    # Keep this bounded to avoid excessive API usage on very large groups.
+    candidate_indexes = range(min(len(destination_points), 10))
+    best_points: list[list[float]] | None = None
+    best_miles: float | None = None
+    best_minutes: float | None = None
+    for destination_index in candidate_indexes:
+        destination_point = destination_points[destination_index]
+        waypoint_points = [p for i, p in enumerate(destination_points) if i != destination_index]
+        points, miles, minutes = _fetch_directions_request(
+            origin_point=supplier_point,
+            destination_point=destination_point,
+            waypoint_points=waypoint_points,
+        )
+        if points is None or miles is None or minutes is None:
+            continue
+        if best_minutes is None or minutes < best_minutes:
+            best_points = points
+            best_miles = miles
+            best_minutes = minutes
+    return best_points, best_miles, best_minutes
+
+
 def compute_delivery_route(
     *,
     supplier_latitude: float,
     supplier_longitude: float,
     destination_points: list[tuple[float, float]],
 ) -> tuple[list[list[float]], float, float]:
-    ordered = _nearest_neighbor_route(
-        (supplier_latitude, supplier_longitude),
+    supplier_point = (supplier_latitude, supplier_longitude)
+    directions_points, directions_miles, directions_minutes = _fetch_optimized_directions(
+        supplier_point,
         destination_points,
     )
-
-    directions_points, directions_miles, directions_minutes = _fetch_directions(ordered)
     if directions_points and directions_miles is not None and directions_minutes is not None:
         return directions_points, float(directions_miles), float(directions_minutes)
 
+    ordered = _nearest_neighbor_route(
+        supplier_point,
+        destination_points,
+    )
     fallback_points = [[lng, lat] for lat, lng in ordered]
     total_miles = 0.0
     for i in range(1, len(ordered)):

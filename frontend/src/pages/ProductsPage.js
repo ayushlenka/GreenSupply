@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { createGroup, fetchProducts, fetchSupplierProducts, joinGroup } from '../api';
+import { createGroup, fetchBusinessOrders, fetchProducts, fetchSupplierProducts, joinGroup } from '../api';
 import Navbar from '../components/Navbar';
 
 export default function ProductsPage({ auth }) {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [supplierProducts, setSupplierProducts] = useState([]);
+  const [businessOrders, setBusinessOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -20,12 +22,15 @@ export default function ProductsPage({ auth }) {
   });
 
   useEffect(() => {
-    Promise.allSettled([fetchProducts(), fetchSupplierProducts()])
-      .then(([productsResult, supplierProductsResult]) => {
+    const businessId = auth?.profile?.id;
+    Promise.allSettled([fetchProducts(), fetchSupplierProducts(), businessId ? fetchBusinessOrders(businessId) : Promise.resolve([])])
+      .then(([productsResult, supplierProductsResult, businessOrdersResult]) => {
         const productsData = productsResult.status === 'fulfilled' ? productsResult.value : [];
         const supplierProductsData = supplierProductsResult.status === 'fulfilled' ? supplierProductsResult.value : [];
+        const ordersData = businessOrdersResult.status === 'fulfilled' ? businessOrdersResult.value : [];
         setProducts(productsData);
         setSupplierProducts(supplierProductsData);
+        setBusinessOrders(ordersData);
 
         if (supplierProductsData.length > 0) {
           const firstSupplierProduct = supplierProductsData[0];
@@ -41,9 +46,13 @@ export default function ProductsPage({ auth }) {
       .catch(() => {
         setProducts([]);
         setSupplierProducts([]);
+        setBusinessOrders([]);
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        setLoading(false);
+        setOrdersLoading(false);
+      });
+  }, [auth?.profile?.id]);
 
   const selectedSupplierProduct = useMemo(
     () => supplierProducts.find((item) => item.id === form.supplier_product_id) || null,
@@ -90,6 +99,11 @@ export default function ProductsPage({ auth }) {
       ) || null
     );
   }, [products, selectedSupplierProduct]);
+
+  const completedOrders = useMemo(
+    () => businessOrders.filter((order) => order.status === 'completed'),
+    [businessOrders]
+  );
 
   const onChange = (key) => (event) => {
     const value = event.target.value;
@@ -176,6 +190,8 @@ export default function ProductsPage({ auth }) {
 
       await joinGroup(group.id, businessId, initialCommitmentUnits);
       setMessage('Group order proposed and your commitment was added.');
+      const refreshedOrders = await fetchBusinessOrders(businessId);
+      setBusinessOrders(refreshedOrders);
       navigate('/groups');
     } catch (err) {
       setError(String(err?.message || 'Unable to create group order.'));
@@ -282,6 +298,51 @@ export default function ProductsPage({ auth }) {
             </form>
           </section>
         )}
+
+        <section className="mt-8 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-semibold">Order History</h2>
+
+          {ordersLoading ? (
+            <p className="mt-4 text-sm text-ink/60">Loading order history...</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {completedOrders.length === 0 ? (
+                <p className="text-sm text-ink/60">No completed orders in history yet.</p>
+              ) : (
+                completedOrders.map((order) => (
+                  <article key={order.id} className="rounded-lg border border-black/10 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-base font-semibold">{order.group_display_name}</p>
+                        <p className="text-xs text-ink/65">
+                          {order.product_name ? `Product: ${order.product_name} | ` : ''}
+                          Your units: {order.your_units} | Total: {order.total_units}
+                        </p>
+                      </div>
+                      <span className="rounded bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+                        {order.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {order.scheduled_start_at ? `Start: ${new Date(order.scheduled_start_at).toLocaleString()} | ` : ''}
+                      {order.estimated_end_at ? `End: ${new Date(order.estimated_end_at).toLocaleString()}` : 'End: TBD'}
+                    </p>
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Businesses Involved</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(order.participants || []).map((participant) => (
+                          <span key={participant.business_id} className="rounded-full bg-black/5 px-3 py-1 text-xs text-ink/75">
+                            {participant.business_name || participant.business_id.slice(0, 8)} ({participant.units})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          )}
+        </section>
       </main>
     </div>
   );
