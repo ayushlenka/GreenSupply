@@ -38,8 +38,8 @@ async def create_business(
     resolved_longitude = longitude
     if resolved_latitude is None or resolved_longitude is None:
         location_country = "United States"
-        address_parts = [address, normalized_city, normalized_state, zip_code, location_country]
-        geocode_input = ", ".join([part for part in address_parts if part])
+        address_parts = [address, normalized_city, normalized_state, zip_code.strip() if zip_code else None, location_country]
+        geocode_input = ", ".join([part.strip() for part in address_parts if part and part.strip()])
         if geocode_input.strip():
             geo = geocode_address(geocode_input)
             if geo:
